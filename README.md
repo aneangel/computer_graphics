@@ -7,3 +7,4 @@ A collection of computer graphics projects.
 - [Raytracer](./raytracer)
 - [3D Viewer](./3d-viewer)
 - [Render Pipeline](./render-pipeline)
+- [Particle Paths](./particle-paths)
