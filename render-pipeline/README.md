@@ -2,13 +2,13 @@
 
 A GPU raytracer that renders human motion in 3D.
 
-![Kung fu](docs/kungfu.png)
+![Kung fu](docs/kick.gif)
 
 Give it a motion clip and it opens a window you can fly around in, or writes a
-video file. The motion above is a flying kick from Motion-X, taken from an
-online video, posed with SMPL-X and traced at 20,908 triangles a frame.
+video file. Above is a flying kick from Motion-X, taken from an online video,
+posed with SMPL-X and traced at 20,908 triangles a frame.
 
-Videos: [kick.mp4](docs/kick.mp4) and [walk.mp4](docs/walk.mp4).
+Full quality: [kick.mp4](docs/kick.mp4), [walk.mp4](docs/walk.mp4).
 
 ## What it does
 
@@ -57,7 +57,7 @@ curl -sLO https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main
 tools/play.sh CesiumMan.glb
 ```
 
-![Walking](docs/walk.png)
+![Walking](docs/walk.gif)
 
 That opens the viewer with a walking figure. Add `--render out.mp4` to write a
 video instead.
