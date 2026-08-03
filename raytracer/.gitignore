@@ -1,2 +1,17 @@
-output/
-build/
+# Allowlist: ignore everything in this subproject by default...
+*
+
+# ...but keep descending into directories, so the rules below can reach inside
+# them. Without this, git never looks inside src/ and the !/src/** below can
+# never match.
+!*/
+
+# ...and un-ignore only what defines the project.
+!/.gitignore
+!/CMakeLists.txt
+!/src/**
+
+# Build trees: re-ignored as whole directories so git doesn't walk them at all.
+/build/
+/cmake-build-debug/
+/.idea/
