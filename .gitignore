@@ -1,0 +1,8 @@
+# IDE and build artifacts
+.idea/
+build/
+cmake-build-*/
+
+# Stray binaries and render output at the repo root
+/main
+/*.ppm
