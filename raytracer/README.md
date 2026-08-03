@@ -157,3 +157,5 @@ now takes longer than drawing it.
 
 The scene and the original CPU raytracer it grew out of were inspired by
 [ssloy/tinyraytracer](https://github.com/ssloy/tinyraytracer).
+
+And thank you to one of many [resources for raytracing](https://github.com/RayTracing/raytracing.github.io/tree/release)
