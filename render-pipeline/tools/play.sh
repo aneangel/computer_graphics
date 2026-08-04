@@ -63,7 +63,7 @@ if [ ! -f "$MSQ" ] || [ "$SOURCE" -nt "$MSQ" ]; then
             ;;
         *.zip)
             # Motion-X ships video and motion under one name, so check the contents.
-            # Matched with case, since grep -q would SIGPIPE the producer under pipefail.
+            # Matched with case, since grep -q would SIGPIPE the producer.
             LISTING=$(unzip -l "$SOURCE" 2>/dev/null || true)
             case "$LISTING" in
                 *.npy*) ;;
