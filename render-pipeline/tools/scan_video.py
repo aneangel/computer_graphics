@@ -106,14 +106,14 @@ def detect(video, stride, imgsz, conf):
 
 
 def displacement(a, b, width, height):
-    """Median nearest centre distance between two samples, as a frame fraction."""
+    """Median nearest center distance between two samples, as a frame fraction."""
     if not a or not b:
         return 1.0 if (a or b) else 0.0
 
-    def centres(boxes):
+    def centers(boxes):
         return [((x[0] + x[2]) * 0.5 / width, (x[1] + x[3]) * 0.5 / height) for x in boxes]
 
-    ca, cb = centres(a), centres(b)
+    ca, cb = centers(a), centers(b)
 
     def nearest(one, many):
         out = []
@@ -133,8 +133,8 @@ def cut_times(scores, samples, fps, stride, args, width, height, gap=0.4):
         a, b = samples[i - 1], samples[i]
         moved = displacement(a["p"], b["p"], width, height) > args.max_shift
         # Grass entering or leaving covers the case with nobody in shot to measure.
-        recoloured = abs(a["g"] - b["g"]) > args.green_jump
-        if not (moved or recoloured):
+        recolored = abs(a["g"] - b["g"]) > args.green_jump
+        if not (moved or recolored):
             continue
         # The boxes give the stride, the peak scene score inside it gives the frame.
         lo, hi = (i - 1) * stride / fps, i * stride / fps
@@ -228,7 +228,7 @@ def score(m):
     return size * crowd * (m["contained"] ** 2) * m["presence"]
 
 
-def analyse(data, args):
+def analyze(data, args):
     """Cut the sweep into shots and judge them, without touching video."""
     samples, width, height = data["samples"], data["width"], data["height"]
     fps, total, stride = data["fps"], data["duration"], data["stride"]
@@ -329,7 +329,7 @@ def main():
                 with open(path) as f:
                     data = json.load(f)
                 with open(path, "w") as f:
-                    json.dump(analyse(data, args), f)
+                    json.dump(analyze(data, args), f)
             print(f"recut and rescored {len(scans)} manifests", file=sys.stderr)
         report(scans, args.top)
         return
@@ -352,7 +352,7 @@ def main():
             print(f"{stem:<12} cached", file=sys.stderr)
             continue
 
-        data = analyse(sweep(video, args), args)
+        data = analyze(sweep(video, args), args)
         with open(path, "w") as f:
             json.dump(data, f)
 

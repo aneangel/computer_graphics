@@ -137,7 +137,7 @@ def main():
     ap.add_argument("-s", "--static-cam", action="store_true",
                     help="the camera does not move, which makes the trajectory easier")
     ap.add_argument("--no-align", dest="align", action="store_false",
-                    help="keep GEM's own frame instead of levelling the floor")
+                    help="keep GEM's own frame instead of leveling the floor")
     args = ap.parse_args()
 
     if not args.video.lower().endswith(VIDEO_EXTENSIONS):
@@ -156,7 +156,7 @@ def main():
 
     if args.align:
         rotation, tilt, yaw = ground_alignment(joints)
-        print(f"  levelled {tilt:.1f} deg of tilt, turned {yaw:.0f} deg to face the camera")
+        print(f"  leveled {tilt:.1f} deg of tilt, turned {yaw:.0f} deg to face the camera")
         verts = verts @ rotation.T
 
     verts = place_in_scene(verts, up="y")

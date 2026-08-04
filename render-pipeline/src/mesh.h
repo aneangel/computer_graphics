@@ -52,7 +52,7 @@ inline Mesh make_uv_sphere(const float3 &center, const float radius, const int s
         const float st = sinf(theta), ct = cosf(theta);
         for (int j = 0; j <= slices; ++j) {
             const float phi = 6.28318530718f * static_cast<float>(j) / static_cast<float>(slices);
-            // On a sphere the outward normal is the unit offset from the centre.
+            // On a sphere the outward normal is the unit offset from the center.
             const float3 n = make_float3(st * cosf(phi), ct, st * sinf(phi));
             m.normals.push_back(n);
             m.positions.push_back(center + n * radius);

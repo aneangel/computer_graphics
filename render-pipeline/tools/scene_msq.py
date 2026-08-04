@@ -4,12 +4,12 @@ Everything lands in one vertex array behind one triangle list, with an object
 table saying which run of triangles is whose.
 
     python tools/scene_msq.py a.msq b.msq --out scene.msq \
-        --colour 0.10,0.25,0.80 --colour 0.90,0.90,0.90
+        --color 0.10,0.25,0.80 --color 0.90,0.90,0.90
 
-Sequences written one at a time were each centred on the same spot, so merging
+Sequences written one at a time were each centered on the same spot, so merging
 them unaltered stands everybody inside everybody else. Use --offset for those.
 
-The ball file is JSON: {"radius": 0.4, "centres": [[x, y, z], ...]}, one centre
+The ball file is JSON: {"radius": 0.4, "centers": [[x, y, z], ...]}, one center
 per frame, in the same units as the sequences.
 """
 
@@ -23,7 +23,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from msq import read_msq, write_msq  # noqa: E402
 
-BODY_COLOURS = [
+BODY_COLORS = [
     (0.10, 0.25, 0.80),  # blue kit
     (0.85, 0.85, 0.88),  # white kit
     (0.80, 0.15, 0.15),  # red kit
@@ -31,7 +31,7 @@ BODY_COLOURS = [
     (0.90, 0.75, 0.10),  # keeper
     (0.45, 0.20, 0.60),
 ]
-BALL_COLOUR = (0.95, 0.95, 0.95)
+BALL_COLOR = (0.95, 0.95, 0.95)
 
 
 def uv_sphere(radius, slices=32, stacks=16):
@@ -71,14 +71,14 @@ def ball_part(path, frames):
         spec = json.load(f)
     verts, faces = uv_sphere(float(spec.get("radius", 0.4)))
 
-    centres = np.asarray(spec["centres"], np.float32)
-    if centres.ndim != 2 or centres.shape[1] != 3:
-        raise SystemExit(f"{path}: centres must be a list of [x, y, z], got {centres.shape}")
-    if len(centres) < frames:
+    centers = np.asarray(spec["centers"], np.float32)
+    if centers.ndim != 2 or centers.shape[1] != 3:
+        raise SystemExit(f"{path}: centers must be a list of [x, y, z], got {centers.shape}")
+    if len(centers) < frames:
         # Holds the last position, rather than looping back across the pitch.
-        centres = np.concatenate([centres, np.repeat(centres[-1:], frames - len(centres), 0)])
+        centers = np.concatenate([centers, np.repeat(centers[-1:], frames - len(centers), 0)])
 
-    return (verts[None, :, :] + centres[:frames, None, :]).astype(np.float32), faces
+    return (verts[None, :, :] + centers[:frames, None, :]).astype(np.float32), faces
 
 
 def merge(parts):
@@ -87,11 +87,11 @@ def merge(parts):
 
     out_faces, out_verts, objects = [], [], []
     vertex_at, triangle_at = 0, 0
-    for verts, faces, colours in parts:
+    for verts, faces, colors in parts:
         out_verts.append(verts[:frames])
         out_faces.append(faces + vertex_at)
-        for first, count, colour in colours:
-            objects.append((triangle_at + first, count, colour))
+        for first, count, color in colors:
+            objects.append((triangle_at + first, count, color))
         vertex_at += verts.shape[1]
         triangle_at += len(faces)
 
@@ -109,20 +109,20 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("sequences", nargs="*", help="the .msq files to merge")
     ap.add_argument("--out", default="scene.msq")
-    ap.add_argument("--colour", action="append", default=[], metavar="R,G,B",
+    ap.add_argument("--color", action="append", default=[], metavar="R,G,B",
                     help="one per sequence, in order; the rest come from a default kit list")
     ap.add_argument("--offset", action="append", default=[], metavar="X,Y,Z",
                     help="one per sequence, for actors that were recovered separately "
                          "and so share no frame to be placed in")
     ap.add_argument("--ball", help="a trajectory JSON to fly a sphere along")
-    ap.add_argument("--ball-colour", default=None, metavar="R,G,B")
+    ap.add_argument("--ball-color", default=None, metavar="R,G,B")
     ap.add_argument("--fps", type=float, default=0.0, help="0 keeps the first sequence's rate")
     args = ap.parse_args()
 
     if not args.sequences and not args.ball:
         ap.error("give at least one sequence, or a --ball")
-    if args.colour and len(args.colour) > len(args.sequences):
-        ap.error(f"{len(args.colour)} colours for {len(args.sequences)} sequences")
+    if args.color and len(args.color) > len(args.sequences):
+        ap.error(f"{len(args.color)} colors for {len(args.sequences)} sequences")
     if args.offset and len(args.offset) > len(args.sequences):
         ap.error(f"{len(args.offset)} offsets for {len(args.sequences)} sequences")
 
@@ -133,16 +133,16 @@ def main():
         if not fps:
             fps = part_fps
 
-        if i < len(args.colour):
-            colour = parse_triple(args.colour[i], "--colour")
+        if i < len(args.color):
+            color = parse_triple(args.color[i], "--color")
         else:
-            colour = BODY_COLOURS[i % len(BODY_COLOURS)]
+            color = BODY_COLORS[i % len(BODY_COLORS)]
 
         # A sequence that already names its actors keeps them.
         if objects and len(objects) > 1:
             parts.append((verts, faces, objects))
         else:
-            parts.append((verts, faces, [(0, len(faces), colour)]))
+            parts.append((verts, faces, [(0, len(faces), color)]))
         print(f"  {os.path.basename(path):<28} {verts.shape[0]:4d} frames  "
               f"{verts.shape[1]:6d} verts  {len(faces):6d} tris")
 
@@ -150,9 +150,9 @@ def main():
         # Sized against the actors, so the ball never decides the scene length.
         frames = min(v.shape[0] for v, _, _ in parts) if parts else None
         verts, faces = ball_part(args.ball, frames or 10 ** 9)
-        colour = parse_triple(args.ball_colour, "--ball-colour") if args.ball_colour \
-            else BALL_COLOUR
-        parts.append((verts, faces, [(0, len(faces), colour)]))
+        color = parse_triple(args.ball_color, "--ball-color") if args.ball_color \
+            else BALL_COLOR
+        parts.append((verts, faces, [(0, len(faces), color)]))
         print(f"  {'ball':<28} {verts.shape[0]:4d} frames  "
               f"{verts.shape[1]:6d} verts  {len(faces):6d} tris")
 

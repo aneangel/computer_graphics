@@ -18,7 +18,7 @@ constexpr int MAX_DEPTH = 4;
 constexpr float MIN_THROUGHPUT = 1e-3f;
 constexpr float SURFACE_EPS = 1e-3f;
 
-// 8x8 puts neighbouring pixels in one warp, which keeps ray paths coherent.
+// 8x8 puts neighboring pixels in one warp, which keeps ray paths coherent.
 constexpr int BLOCK_X = 8;
 constexpr int BLOCK_Y = 8;
 

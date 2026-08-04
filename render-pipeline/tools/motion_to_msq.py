@@ -67,7 +67,7 @@ def load_motion(path):
 
     # AMASS: separate arrays, SMPL+H pose layout.
     if "poses" not in raw.files:
-        raise ValueError(f"{path}: not a recognised AMASS or Motion-X file")
+        raise ValueError(f"{path}: not a recognized AMASS or Motion-X file")
     poses = raw["poses"].astype(np.float32)
     if poses.shape[1] < 72:
         raise ValueError(f"expected at least 72 pose values per frame, got {poses.shape[1]}")
@@ -176,9 +176,9 @@ def ground_alignment(joints, max_tilt=50.0, min_spread=0.05):
     normal = None
     if len(low) >= 3:
         # The normal is the direction of least spread in the contact points.
-        centred = low - low.mean(axis=0)
-        _u, singular, basis = np.linalg.svd(centred, full_matrices=False)
-        spread = singular / np.sqrt(len(low))  # metres, independent of frame count
+        centered = low - low.mean(axis=0)
+        _u, singular, basis = np.linalg.svd(centered, full_matrices=False)
+        spread = singular / np.sqrt(len(low))  # meters, independent of frame count
         # A line of contacts fixes no plane, and a tiny patch of them is noise.
         if spread[1] > 0.05 * spread[0] and spread[1] > min_spread:
             normal = basis[-1]
@@ -298,7 +298,7 @@ def to_vertices(motion, model_path, chunk=128):
             np.concatenate(joints, axis=0))
 
 
-def place_in_scene(verts, up="z", height=6.0, centre=(0.0, -16.0), floor_y=-4.0):
+def place_in_scene(verts, up="z", height=6.0, center=(0.0, -16.0), floor_y=-4.0):
     """Fit the sequence into the default scene, once over every frame."""
     if up == "z":
         # Body models are usually authored z up, and the renderer is y up.
@@ -316,7 +316,7 @@ def place_in_scene(verts, up="z", height=6.0, centre=(0.0, -16.0), floor_y=-4.0)
     mid = (lo + hi) * 0.5
     # A low quantile, so one bad frame cannot lift the clip off the ground.
     ground = float(np.quantile(flat[:, 1], 0.002))
-    offset = np.array([centre[0] - mid[0], floor_y - ground, centre[1] - mid[2]], np.float32)
+    offset = np.array([center[0] - mid[0], floor_y - ground, center[1] - mid[2]], np.float32)
     return (verts + offset).astype(np.float32)
 
 
@@ -333,7 +333,7 @@ def main():
                     help="up axis of the source motion; auto reads it off the skeleton")
     ap.add_argument("--max-frames", type=int, default=0, help="0 for all")
     ap.add_argument("--no-align", dest="align", action="store_false",
-                    help="skip levelling and facing; keep the capture's own frame")
+                    help="skip leveling and facing; keep the capture's own frame")
     args = ap.parse_args()
 
     if args.list is not None:
@@ -374,7 +374,7 @@ def main():
 
     if args.align:
         rotation, tilt, yaw = ground_alignment(joints)
-        print(f"  levelled {tilt:.1f} deg of tilt, turned {yaw:.0f} deg to face the camera")
+        print(f"  leveled {tilt:.1f} deg of tilt, turned {yaw:.0f} deg to face the camera")
         verts = verts @ rotation.T
 
     verts = place_in_scene(verts, up="y")

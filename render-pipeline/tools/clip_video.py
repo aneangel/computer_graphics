@@ -16,7 +16,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 
 SCENE_RE = re.compile(r"pts_time:([0-9.]+)")
 

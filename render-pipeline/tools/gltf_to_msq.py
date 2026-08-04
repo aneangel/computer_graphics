@@ -195,7 +195,7 @@ def bake(path, fps=30.0, max_frames=0):
     weights = g.accessor(prim["attributes"]["WEIGHTS_0"]).astype(np.float64)
     faces = g.accessor(prim["indices"])[:, 0].reshape(-1, 3).astype(np.int32)
 
-    # Unnormalised weights inflate or shrink the body without looking wrong.
+    # Unnormalized weights inflate or shrink the body without looking wrong.
     weights = weights / np.maximum(weights.sum(axis=1, keepdims=True), 1e-12)
 
     # Column major again, one 4x4 per joint.

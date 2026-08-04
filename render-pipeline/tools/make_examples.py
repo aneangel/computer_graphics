@@ -10,7 +10,6 @@ breaks them shows up in the same file.
 """
 
 import argparse
-import json
 import os
 import shutil
 import subprocess
@@ -26,21 +25,21 @@ WIDTH, HEIGHT, FPS = 1280, 720, 30
 
 # name, source footage, what the renderer opens
 EXAMPLES = [
-    ("Four players and a ball", "samples/soccer_four_players.mp4",
-     ".cache/soccer_four_players.msq"),
-    ("Four players, wider", "samples/soccer_four_wide.mp4", ".cache/soccer_four_wide.msq"),
-    ("Keeper diving", "samples/soccer_keeper_dive.mp4", ".cache/soccer_keeper_dive.msq"),
-    ("Running", "samples/soccer_player_run.mp4", ".cache/soccer_player_run.msq"),
-    ("Flying kick", "samples/kungfu_kick.mp4", ".cache/kungfu_kick.msq"),
-    ("Stanford Dragon", None, "~/Downloads/xyzrgb_dragon.obj"),
-    ("Happy Buddha", None, "~/Downloads/happy.obj"),
+    ("Human interacting with a crowd", "samples/trial_sample.mp4",
+     "samples/trial_sample.mp4"),
+    # ("Four players, wider", "samples/soccer_four_wide.mp4", ".cache/soccer_four_wide.msq"),
+    # ("Keeper diving", "samples/soccer_keeper_dive.mp4", ".cache/soccer_keeper_dive.msq"),
+    # ("Running", "samples/soccer_player_run.mp4", ".cache/soccer_player_run.msq"),
+    # ("Flying kick", "samples/kungfu_kick.mp4", ".cache/kungfu_kick.msq"),
+    # ("Stanford Dragon", None, "~/Downloads/xyzrgb_dragon.obj"),
+    # ("Happy Buddha", None, "~/Downloads/happy.obj"),
 ]
 
 
 def label(text, corner):
     """A drawtext filter, with the characters ffmpeg reads as syntax escaped."""
     safe = text.replace("\\", "").replace(":", "\\:").replace("'", "")
-    x = "40" if corner == "left" else f"w-tw-40"
+    x = "40" if corner == "left" else "w-tw-40"
     return (f"drawtext=fontfile={FONT}:text='{safe}':fontsize=30:fontcolor=white:"
             f"box=1:boxcolor=black@0.45:boxborderw=14:x={x}:y=h-th-40")
 

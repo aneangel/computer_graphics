@@ -21,7 +21,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from motion_to_msq import rotation_between  # noqa: E402
 from msq import write_msq  # noqa: E402
-from scene_msq import BODY_COLOURS, BALL_COLOUR, merge, uv_sphere  # noqa: E402
+from scene_msq import BODY_COLORS, BALL_COLOR, merge, uv_sphere  # noqa: E402
 
 GEM_ROOT = os.path.expanduser(os.environ.get("GEM_ROOT", "~/GENMO"))
 
@@ -83,12 +83,34 @@ def pose_actors(params_paths, model_path):
             input=json.dumps(params_paths), capture_output=True, text=True)
         if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
             raise SystemExit(f"posing failed:\n{proc.stdout[-800:]}\n{proc.stderr[-800:]}")
-        data = np.load(out_path)
-        return ([data[f"verts{i}"] for i in range(int(data["count"]))],
-                data["faces"], data["K"])
+        # Pulled once: indexing an npz decompresses the whole array again.
+        with np.load(out_path) as data:
+            count = int(data["count"])
+            return ([data[f"verts{i}"] for i in range(count)],
+                    data["faces"], data["K"])
     finally:
         if os.path.exists(out_path):
             os.unlink(out_path)
+
+
+def align_actors(posed, scene):
+    """Put every actor on the clip's own timeline.
+
+    Estimated independently, each actor covers only the frames it was there for.
+    A mesh sequence has one vertex count for the whole file, so nobody in it can
+    stop existing. They hold their first and last pose instead, which reads as a
+    player standing still rather than a body appearing out of nothing.
+    """
+    frames = scene.get("frames")
+    if not scene.get("independent") or not frames:
+        return posed
+
+    out = []
+    for verts, actor in zip(posed, scene["actors"]):
+        # Clipped, so before they arrive and after they leave the pose is held.
+        want = np.clip(np.arange(frames) - actor.get("first", 0), 0, len(verts) - 1)
+        out.append(verts[want])
+    return out
 
 
 def camera_to_world(points):
@@ -164,7 +186,8 @@ def fit_trajectory(points, good, weight_depth=0.02, smooth=40.0):
 
     weights = np.where(good, 1.0, 0.0)
     A[np.arange(n), np.arange(n)] = weights
-    b[:n] = points * weights[:, None]
+    # An unseen frame has infinite depth and zero weight, and inf * 0 is a nan.
+    b[:n] = np.where(np.isfinite(points), points, 0.0) * weights[:, None]
 
     for i in range(rows):
         A[n + i, i] = smooth
@@ -185,8 +208,8 @@ def fit_trajectory(points, good, weight_depth=0.02, smooth=40.0):
 
 def limit_speed(verts, fps, max_speed=12.0):
     """Cap how far a body travels between frames, and rebuild its path."""
-    centre = verts.mean(axis=1)
-    steps = np.diff(centre, axis=0)
+    center = verts.mean(axis=1)
+    steps = np.diff(center, axis=0)
     distance = np.linalg.norm(steps, axis=1)
 
     cap = max_speed / max(fps, 1e-6)
@@ -200,9 +223,9 @@ def limit_speed(verts, fps, max_speed=12.0):
     corrected = np.concatenate([np.zeros((1, 3)), np.cumsum(scaled, axis=0)])
 
     # Anchored on the median, since frame zero is as likely as any to be the bad one.
-    corrected += np.median(centre, axis=0) - np.median(corrected, axis=0)
+    corrected += np.median(center, axis=0) - np.median(corrected, axis=0)
 
-    shift = (corrected - centre).astype(np.float32)
+    shift = (corrected - center).astype(np.float32)
     return verts + shift[:, None, :], float(np.abs(shift).max())
 
 
@@ -219,8 +242,8 @@ def ground_plane(actors, quantile=0.15):
     if len(keep) < 8:
         return np.array([0.0, 1.0, 0.0]), float(contacts[:, 1].min())
 
-    centred = keep - keep.mean(axis=0)
-    _u, singular, basis = np.linalg.svd(centred, full_matrices=False)
+    centered = keep - keep.mean(axis=0)
+    _u, singular, basis = np.linalg.svd(centered, full_matrices=False)
     spread = singular / np.sqrt(len(keep))
     # A line or a patch of contacts fixes no plane, so decline rather than guess.
     if spread[1] < 0.05 * spread[0] or spread[1] < 0.05:
@@ -244,6 +267,45 @@ def level_scene(actors, ball, normal, max_tilt=25.0):
             None if ball is None else ball @ R.T, tilt)
 
 
+def stand_on_ground(actors, floor, stature=1.80, quantile=0.02):
+    """Slide each actor along its own view ray until its feet reach the floor.
+
+    Estimated one at a time, every actor carries its own idea of how far away it
+    was, and a depth that is out by a tenth leaves that body hanging in the air.
+    Leveling cannot reach this: it is one rotation for the scene, and this is a
+    different error per actor.
+
+    Scaling a body about the camera moves it along the ray it was seen down, so
+    it lands on exactly the same pixels afterwards. That is what it means for
+    monocular scale to be unrecoverable, and it is what makes the correction
+    free: the picture cannot tell the difference, and the floor can.
+
+    Contact alone will not do it. Solving only for feet on the floor sends an
+    actor whose feet came out near the camera's own height off to infinity, and
+    returns bodies nine meters tall. The ray needs pinning by something known,
+    and what is known is that a footballer is about `stature` tall.
+
+    So size sets the ray, and the floor is not solved for at all: the gap that
+    is left is how far out that actor's depth was, in meters, and is reported
+    rather than hidden. Closing it is a small lift afterwards.
+    """
+    out, heights, lifts = [], [], []
+    for verts in actors:
+        tall = float(np.median(verts[..., 1].max(1) - verts[..., 1].min(1)))
+        # Along the view ray, so the body still lands on the pixels it came from.
+        scale = stature / tall if tall > 1e-6 else 1.0
+        sized = (verts * scale).astype(np.float32)
+
+        # What is left over. A good depth leaves almost nothing here.
+        gap = floor * scale - float(np.quantile(sized[..., 1], quantile))
+        lifts.append(gap)
+        sized[..., 1] += gap
+
+        out.append(sized)
+        heights.append(float(np.median(sized[..., 1].max(1) - sized[..., 1].min(1))))
+    return out, heights, lifts
+
+
 def rest_on_ground(ball, floor, radius):
     """Lift the ball out of the floor, then smooth away the corner that leaves."""
     if ball is None:
@@ -259,7 +321,7 @@ def rest_on_ground(ball, floor, radius):
     return lifted if smoothed is None else smoothed.astype(np.float32)
 
 
-def place_scene(actors, ball, height=6.0, centre_x=0.0, nearest_z=-11.0, floor_y=-4.0):
+def place_scene(actors, ball, height=6.0, center_x=0.0, nearest_z=-11.0, floor_y=-4.0):
     """Fit the scene into the renderer's box, one transform for everybody."""
     per_actor = [float(np.median(v[..., 1].max(axis=1) - v[..., 1].min(axis=1)))
                  for v in actors]
@@ -270,9 +332,9 @@ def place_scene(actors, ball, height=6.0, centre_x=0.0, nearest_z=-11.0, floor_y
 
     flat = np.concatenate([v.reshape(-1, 3) for v in actors])
     lo, hi = flat.min(0), flat.max(0)
-    # Pushed back until the nearest body clears the camera, not centred on a point.
+    # Pushed back until the nearest body clears the camera, not centered on a point.
     ground = float(np.quantile(flat[:, 1], 0.002))
-    offset = np.array([centre_x - (lo[0] + hi[0]) * 0.5,
+    offset = np.array([center_x - (lo[0] + hi[0]) * 0.5,
                        floor_y - ground,
                        nearest_z - hi[2]], np.float32)
 
@@ -288,10 +350,16 @@ def main():
     ap.add_argument("--model-path", default=os.environ.get("SMPLX_MODEL_PATH", "~/models"))
     ap.add_argument("--fps", type=float, default=0.0, help="0 reads it off the clip")
     ap.add_argument("--no-ball", action="store_true")
+    ap.add_argument("--stand", action="store_true",
+                    help="size every actor alike along its own view ray and set "
+                         "them all on one floor, instead of leaving each at the "
+                         "depth it happened to be estimated at")
+    ap.add_argument("--stature", type=float, default=1.80,
+                    help="with --stand, how tall to make a player, in meters")
     ap.add_argument("--contact-radius", type=float, default=45.0,
                     help="pixels between ball and body counting as touching")
     ap.add_argument("--max-speed", type=float, default=12.0,
-                    help="metres a second a body may travel, above a sprinter's best")
+                    help="meters a second a body may travel, above a sprinter's best")
     args = ap.parse_args()
 
     with open(args.actors) as f:
@@ -307,6 +375,7 @@ def main():
         fps = float(num) / float(den or 1) if num else 30.0
 
     posed, faces, K = pose_actors([a["params"] for a in scene["actors"]], args.model_path)
+    posed = align_actors(posed, scene)
     print(f"{len(posed)} actors, {posed[0].shape[0]} frames, {len(faces)} triangles each")
 
     # Unprojected with the estimator's own intrinsics, so it shares their space.
@@ -344,7 +413,19 @@ def main():
 
     normal, _ = ground_plane(actors_world)
     actors_world, ball_world, tilt = level_scene(actors_world, ball_world, normal)
-    print(f"levelled {tilt:.1f} deg of camera tilt, read off {len(actors_world)} actors' feet")
+    print(f"leveled {tilt:.1f} deg of camera tilt, read off {len(actors_world)} actors' feet")
+
+    if args.stand:
+        # From every actor, so no single bad depth decides where the ground is.
+        flat = np.concatenate([v.reshape(-1, 3) for v in actors_world])
+        floor_m = float(np.quantile(flat[:, 1], 0.02))
+        actors_world, heights, lifts = stand_on_ground(actors_world, floor_m,
+                                                       args.stature)
+        gaps = np.abs(lifts)
+        print(f"stood {len(actors_world)} actors at {args.stature:.2f} m on a floor "
+              f"at y={floor_m:.2f}")
+        print(f"  depth error closed by the lift: median {np.median(gaps):.2f} m, "
+              f"worst {gaps.max():.2f} m over {len(gaps)} actors")
 
     # Before scaling, so the clearance is a real ball radius.
     if ball_world is not None:
@@ -352,11 +433,11 @@ def main():
         ball_world = rest_on_ground(ball_world, floor_m, BALL_RADIUS_M)
 
     actors_world, ball_world, scale, floor_y = place_scene(actors_world, ball_world)
-    print(f"scene scale {scale:.2f} (one metre is {scale:.2f} units)")
+    print(f"scene scale {scale:.2f} (one meter is {scale:.2f} units)")
 
     parts = []
     for i, verts in enumerate(actors_world):
-        parts.append((verts, faces, [(0, len(faces), BODY_COLOURS[i % len(BODY_COLOURS)])]))
+        parts.append((verts, faces, [(0, len(faces), BODY_COLORS[i % len(BODY_COLORS)])]))
         lo, hi = verts.reshape(-1, 3).min(0), verts.reshape(-1, 3).max(0)
         print(f"  actor {scene['actors'][i]['track']}: x {lo[0]:6.1f}..{hi[0]:5.1f}  "
               f"z {lo[2]:6.1f}..{hi[2]:5.1f}")
@@ -364,7 +445,7 @@ def main():
     if ball_world is not None:
         sphere, ball_faces = uv_sphere(BALL_RADIUS_M * scale)
         parts.append((sphere[None, :, :] + ball_world[:, None, :], ball_faces,
-                      [(0, len(ball_faces), BALL_COLOUR)]))
+                      [(0, len(ball_faces), BALL_COLOR)]))
         print(f"  ball: radius {BALL_RADIUS_M * scale:.2f} units")
 
     merged_faces, verts, objects, frames = merge(parts)

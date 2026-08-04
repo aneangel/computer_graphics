@@ -1,7 +1,7 @@
 #ifndef GEOM_GPU_CUH
 #define GEOM_GPU_CUH
 
-// Vector math, RNG, sampling and colour conversion for host and device.
+// Vector math, RNG, sampling and color conversion for host and device.
 // NOTE: operator*(float3, float3) is component-wise, not a dot product.
 
 #include <cuda_runtime.h>
@@ -150,7 +150,7 @@ GPU_FN float3 cosine_hemisphere(const float3 &n, RNG &r) {
     return length_squared(d) < 1e-8f ? n : normalize(d);
 }
 
-// Random point on a spherical light's surface. radius 0 returns the centre.
+// Random point on a spherical light's surface. radius 0 returns the center.
 GPU_FN float3 sample_sphere_light(const float3 &center, const float radius, RNG &r) {
     return center + random_unit_vector(r) * radius;
 }

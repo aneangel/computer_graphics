@@ -134,13 +134,13 @@ The estimator recovers one person per run, so several people means several runs,
 and several runs is where scenes go wrong. Each run returns a world of its own,
 and that world only holds together inside the run that produced it. Placing
 three of them side by side gives three unrelated coordinate systems. The usual
-repair is to fit each actor to the scene, stand them on the floor and centre
+repair is to fit each actor to the scene, stand them on the floor and center
 them, which puts everybody on the same spot at the same size and throws away the
 spacing that was the whole reason to recover more than one person.
 
 What the runs do share is a camera. There was only ever one, so camera space is
 the frame all of them are already in, and the scene is assembled there. The
-actors are read in camera space, levelled once against the plane their feet have
+actors are read in camera space, leveled once against the plane their feet have
 collectively been touching, then scaled once and placed once.
 
 ### Where the ball comes from
@@ -150,21 +150,21 @@ is enough on its own. An apparent radius in pixels fixes the distance, and the
 pixel it was found at fixes the rest.
 
 The catch is that distance goes as one over the radius. On a ball twenty pixels
-wide a single pixel of detector jitter is worth half a metre, while the same
-pixel across the frame is worth a centimetre. The trajectory is fitted with
+wide a single pixel of detector jitter is worth half a meter, while the same
+pixel across the frame is worth a centimeter. The trajectory is fitted with
 depth weighted accordingly, and the fit runs through the gaps rather than around
 them, since the frames where the ball vanishes are the frames where it went
 behind somebody and something has to decide what it did there.
 
 Three things then get imposed because they are certain rather than likely. A
 ball cannot be under the ground the players stand on. A body cannot cross
-several metres in one frame, and the limit for that is a sprinter's top speed,
+several meters in one frame, and the limit for that is a sprinter's top speed,
 so what it catches is out by an order of magnitude and is really a tracking box
 that slipped. And where the ball sits over a player in the picture, the player's
 distance is believed over the ball's own, which is what turns a ball flying past
 somebody into a ball at their feet.
 
-On one clip that last rule moved 43 of 45 sightings, by a median of two metres.
+On one clip that last rule moved 43 of 45 sightings, by a median of two meters.
 
 There are ready made clips in `samples/`, with their scenes already cached, so
 these open straight away:
@@ -422,7 +422,7 @@ writes the same format from Python in about twenty lines.
 
 A scene holds more than one thing, and `MSQ2` adds a table saying which run of
 triangles is whose. Everybody still shares one vertex array and one triangle
-list, so the renderer keeps one mesh and one tree. Only the colour lookup at a
+list, so the renderer keeps one mesh and one tree. Only the color lookup at a
 hit changes.
 
 ```
@@ -433,12 +433,12 @@ frame_count       uint32
 fps               float32
 object_count      uint32
 objects           object_count * (first_triangle uint32, triangle_count uint32,
-                                  colour 3 * float32)
+                                  color 3 * float32)
 indices           triangle_count * 3 * int32
 positions         frame_count * vertex_count * 3 * float32
 ```
 
-An object names a colour and nothing else about how to shade it. Which shirt a
+An object names a color and nothing else about how to shade it. Which shirt a
 player wears comes out of the video and only the tools upstream can know it. How
 cloth answers a light belongs to the renderer and is the same for everyone.
 `MSQ1` still loads, as one object.
@@ -453,7 +453,7 @@ cloth answers a light belongs to the renderer and is the same for everyone.
 | `src/mesh.h` | Triangle mesh, sphere generator, OBJ loader |
 | `src/anim.h` | Mesh sequence reader and writer |
 | `src/scene.h` | Materials, lights, camera |
-| `src/geom_gpu.cuh` | Vector maths, random numbers, colour |
+| `src/geom_gpu.cuh` | Vector math, random numbers, color |
 | `tools/play.sh` | Any motion source to the viewer or a video |
 | `tools/video_to_scene.py` | Video to a scene, running the three stages below |
 | `tools/track_people.py` | Everyone in a clip, followed frame by frame |

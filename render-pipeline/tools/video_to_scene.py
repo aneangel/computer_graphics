@@ -44,6 +44,16 @@ def main():
     ap.add_argument("--model-path", default=os.environ.get("SMPLX_MODEL_PATH", "~/models"))
     ap.add_argument("-s", "--static-cam", action="store_true")
     ap.add_argument("--no-ball", action="store_true")
+    ap.add_argument("-j", "--jobs", type=int, default=4,
+                    help="estimator runs at once; each wants about 7 GB")
+    ap.add_argument("--together", action="store_true",
+                    help="estimate over the frames every actor shares, rather than "
+                         "each over its own. Shorter, and the old behavior")
+    ap.add_argument("--flat", action="store_true",
+                    help="leave each actor at the depth it was estimated at, rather "
+                         "than standing them all on one floor")
+    ap.add_argument("--players-only", action="store_true",
+                    help="football: keep only those on the grass, not the crowd")
     args = ap.parse_args()
 
     stem = os.path.splitext(os.path.basename(args.video))[0]
@@ -52,17 +62,23 @@ def main():
     os.makedirs(work, exist_ok=True)
 
     tracks = os.path.join(work, "tracks.json")
-    stage("track", "track_people.py", [args.video, "--out", tracks], tracks)
+    stage("track", "track_people.py",
+          [args.video, "--out", tracks]
+          + (["--players-only"] if args.players_only else []), tracks)
 
     gem = os.path.join(work, "gem")
     actors = os.path.join(gem, "actors.json")
+    # Each actor over its own frames: five once shared only 46 of 300.
     stage("estimate", "run_gem.py",
           [tracks, "--out", gem, "--max-actors", args.max_actors,
-           "--min-frames", args.min_frames] + (["--static-cam"] if args.static_cam else []),
+           "--min-frames", args.min_frames, "--jobs", args.jobs]
+          + ([] if args.together else ["--independent"])
+          + (["--static-cam"] if args.static_cam else []),
           actors)
 
     stage("assemble", "scene_from_video.py",
           [actors, "--out", out, "--model-path", args.model_path]
+          + ([] if args.flat else ["--stand"])
           + (["--no-ball"] if args.no_ball else []),
           out)
     print(f"\n{out}")

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -36,7 +37,7 @@ namespace {
         return make_float3(cosf(pitch) * sinf(yaw), sinf(pitch), -cosf(pitch) * cosf(yaw));
     }
 
-    // Scales and centres a loaded model, which arrives in no particular units.
+    // Scales and centers a loaded model, which arrives in no particular units.
     void fit_into(Mesh &m, const float3 &center, const float radius) {
         float3 lo = m.positions[0], hi = m.positions[0];
         for (const float3 &p : m.positions) {
@@ -52,7 +53,7 @@ namespace {
 
     // Camera as a point to look at and an angle to look from, so it can orbit.
     struct View {
-        float3 centre;
+        float3 center;
         float distance;
         float elevation;
         float azimuth;
@@ -63,12 +64,12 @@ namespace {
         const float a = v.azimuth + turn;
         const float3 offset = make_float3(sinf(a) * cosf(v.elevation), sinf(v.elevation),
             cosf(a) * cosf(v.elevation));
-        return make_camera(v.centre + offset * v.distance, v.centre, world_up, fov, width, height);
+        return make_camera(v.center + offset * v.distance, v.center, world_up, fov, width, height);
     }
 
     // Picks a view that fits the given bounds in frame.
     View frame_camera(const float3 &lo, const float3 &hi) {
-        const float3 centre = (lo + hi) * 0.5f;
+        const float3 center = (lo + hi) * 0.5f;
         const float3 extent = hi - lo;
         const float aspect = static_cast<float>(width) / static_cast<float>(height);
         const float tan_half = tanf(fov * 0.5f);
@@ -80,7 +81,7 @@ namespace {
         const float distance = fmaxf(for_width, for_height) * 1.1f + extent.z * 0.5f;
 
         // Raised a little, which shows how things are arranged in depth.
-        return View{centre, fmaxf(1e-3f, distance), atanf(0.38f), 0.0f};
+        return View{center, fmaxf(1e-3f, distance), atanf(0.38f), 0.0f};
     }
 
     // Writes one frame as a binary PPM.
@@ -101,7 +102,7 @@ namespace {
         ofs.write(rgb.data(), static_cast<std::streamsize>(rgb.size()));
     }
 
-    // Moves to one frame of a sequence. Rebuilding gives a faster tree than refitting.
+    // Moves to one frame. Refit beats rebuild 76 ms to 2 ms; topology is fixed.
     void advance_to(MeshSequence &seq, const int index, Mesh &mesh, BVH &bvh, const bool rebuild) {
         seq.read_frame(index, mesh);  // also recomputes normals
         if (rebuild)
@@ -156,12 +157,19 @@ namespace {
 
     // Frames to numbered files, no window needed.
     int render_offline(MeshSequence &seq, Mesh &mesh, BVH &bvh, const std::string &out_dir,
-        const View &view, const bool animated, const float turns, const int samples) {
+        const View &view, const bool animated, const float turns, const int samples,
+        const bool rebuild_each_frame) {
         // A still model has no length of its own, so an orbit is what gives it one.
         const int frames = animated ? seq.frame_count() : (turns > 0.0f ? 120 : 1);
+
+        // Timed per stage, since guessing is how the rebuild went unnoticed.
+        using clock = std::chrono::steady_clock;
+        double t_geom = 0.0, t_trace = 0.0, t_write = 0.0;
+
         for (int f = 0; f < frames; ++f) {
-            // Many samples per frame here, so a rebuilt tree repays its cost.
-            if (animated) advance_to(seq, f, mesh, bvh, true);
+            auto mark = clock::now();
+            if (animated) advance_to(seq, f, mesh, bvh, rebuild_each_frame);
+            t_geom += std::chrono::duration<double>(clock::now() - mark).count();
 
             const float turn = frames > 1
                 ? turns * 2.0f * static_cast<float>(M_PI) * static_cast<float>(f) /
@@ -170,17 +178,26 @@ namespace {
             const Camera camera = camera_at(view, turn);
 
             // Nothing moves within a frame, so the average keeps converging.
+            mark = clock::now();
             const uint32_t *pixels = nullptr;
             for (int s = 0; s < samples; ++s) pixels = gpu::render(camera, s, 1, true);
+            t_trace += std::chrono::duration<double>(clock::now() - mark).count();
 
+            mark = clock::now();
             char name[512];
             std::snprintf(name, sizeof(name), "%s/frame_%04d.ppm", out_dir.c_str(), f);
             save_ppm(pixels, name);
+            t_write += std::chrono::duration<double>(clock::now() - mark).count();
+
             std::printf("\rframe %d/%d", f + 1, frames);
             std::fflush(stdout);
         }
         std::printf("\nwrote %d frames to %s at %.0f fps\n", frames, out_dir.c_str(),
             animated ? seq.fps() : 0.0f);
+        const double total = t_geom + t_trace + t_write;
+        std::printf("  geometry %6.2fs (%4.1f%%)   trace %6.2fs (%4.1f%%)   write %6.2fs (%4.1f%%)\n",
+            t_geom, 100.0 * t_geom / total, t_trace, 100.0 * t_trace / total,
+            t_write, 100.0 * t_write / total);
         gpu::shutdown();
         return 0;
     }
@@ -212,10 +229,10 @@ int main(int argc, char **argv) {
     // Built against the first frame; advance_to() keeps it current.
     bvh = build_bvh(mesh);
 
-    // colour, diffuse albedo, specular albedo, reflectivity, specular exponent
+    // color, diffuse albedo, specular albedo, reflectivity, specular exponent
     const Material ivory = make_material(make_float3(0.4f, 0.4f, 0.3f), 0.6f, 0.3f, 0.1f, 50.0f);
 
-    // A scene gives a colour per actor; how it shades is decided here.
+    // A scene gives a color per actor; how it shades is decided here.
     std::vector<Material> materials{ivory};
     std::vector<int> tri_material;
     if (animated && sequence.objects().size() > 1) {
@@ -265,8 +282,11 @@ int main(int argc, char **argv) {
     if (argc > 2) {
         const float turns = argc > 3 ? strtof(argv[3], nullptr) : 0.0f;
         const int samples = argc > 4 ? atoi(argv[4]) : offline_samples;
+        // Set REBUILD_BVH=1 to rebuild the tree each frame instead of refitting.
+        const char *env = std::getenv("REBUILD_BVH");
+        const bool rebuild = env != nullptr && env[0] == '1';
         return render_offline(sequence, mesh, bvh, argv[2], view, animated, turns,
-            std::max(1, samples));
+            std::max(1, samples), rebuild);
     }
 
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {

@@ -64,7 +64,7 @@ check("betas trimmed to 10", m["betas"].shape == (10,))
 print("axis conversion")
 # One point one unit along each axis, z up. Expect (x, z, -y).
 pts = np.array([[[1, 0, 0], [0, 1, 0], [0, 0, 1]]], np.float32)
-out = place_in_scene(pts, up="z", height=1.0, centre=(0.0, 0.0), floor_y=0.0)
+out = place_in_scene(pts, up="z", height=1.0, center=(0.0, 0.0), floor_y=0.0)
 direction = out[0, 2] - out[0, 0]  # was +z, should now point up in y
 check("z becomes up", direction[1] > 0, f"delta {direction.round(2)}")
 
@@ -72,13 +72,13 @@ print("scene fit")
 # A box two units tall that also drifts sideways over three frames.
 box = np.array([[-0.5, -1.0, -0.5], [0.5, -1.0, 0.5], [0.5, 1.0, 0.5], [-0.5, 1.0, -0.5]], np.float32)
 seq = np.stack([box + np.array([d, 0, 0], np.float32) for d in (0.0, 1.0, 2.0)])
-out = place_in_scene(seq, up="y", height=6.0, centre=(0.0, -16.0), floor_y=-4.0)
+out = place_in_scene(seq, up="y", height=6.0, center=(0.0, -16.0), floor_y=-4.0)
 
 check("scaled to requested height",
       abs((out[..., 1].max() - out[..., 1].min()) - 6.0) < 1e-4,
       f"{out[..., 1].max() - out[..., 1].min():.3f}")
 check("feet land on the floor", abs(out[..., 1].min() - (-4.0)) < 1e-4, f"{out[..., 1].min():.3f}")
-check("centred on z", abs(out[..., 2].mean() - (-16.0)) < 1e-4, f"{out[..., 2].mean():.3f}")
+check("centered on z", abs(out[..., 2].mean() - (-16.0)) < 1e-4, f"{out[..., 2].mean():.3f}")
 
 # Drift of 1.0 per frame at scale 3.0 must survive as 3.0.
 drift = out[1, :, 0].mean() - out[0, :, 0].mean()
@@ -141,8 +141,8 @@ line[:, [J_LFOOT, J_RFOOT], 1] = 0.05
 R, tilt, _ = ground_alignment(line)
 check("upright figure stays upright", abs(tilt) < 1.0, f"tilt {tilt:.2f}deg")
 
-print("a subject standing on one spot is not levelled from posture")
-# Bent double with feet planted, where levelling from either cue stands him up.
+print("a subject standing on one spot is not leveled from posture")
+# Bent double with feet planted, where leveling from either cue stands him up.
 bent = standing(40)
 bent[:, [J_LFOOT, J_RFOOT], 0] = np.array([-0.10, 0.10])       # feet still
 bent[:, [J_LFOOT, J_RFOOT], 2] = 0.0
@@ -177,12 +177,12 @@ check("a file without objects reports none", objects is None)
 
 print("object table")
 scene = os.path.join(TMP, "scene.msq")
-colours = [(0.0, 0.2, 0.8), (0.9, 0.9, 0.9)]
-write_msq(scene, faces, out, 30.0, [(0, 1, colours[0]), (1, 1, colours[1])])
+colors = [(0.0, 0.2, 0.8), (0.9, 0.9, 0.9)]
+write_msq(scene, faces, out, 30.0, [(0, 1, colors[0]), (1, 1, colors[1])])
 _, _, _, back = read_msq(scene)
 check("objects survive", back is not None and len(back) == 2, f"got {back}")
 check("spans survive", [(o[0], o[1]) for o in back] == [(0, 1), (1, 1)])
-check("colours survive", np.allclose([o[2] for o in back], colours, atol=1e-6))
+check("colors survive", np.allclose([o[2] for o in back], colors, atol=1e-6))
 
 print("rejects bad input")
 for name, fn in [
@@ -190,7 +190,7 @@ for name, fn in [
      lambda: write_msq(os.path.join(TMP, "x.msq"), np.array([[0, 1, 99]], np.int32), out, 30.0)),
     ("wrong vertex rank",
      lambda: write_msq(os.path.join(TMP, "x.msq"), faces, np.zeros((4, 3), np.float32), 30.0)),
-    # A gap here is a triangle with no colour, seen far from the tool that wrote it.
+    # A gap here is a triangle with no color, seen far from the tool that wrote it.
     ("objects leaving a gap",
      lambda: write_msq(os.path.join(TMP, "x.msq"), faces, out, 30.0,
                        [(0, 1, (1, 1, 1))])),

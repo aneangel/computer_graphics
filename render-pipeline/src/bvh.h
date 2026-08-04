@@ -73,7 +73,7 @@ inline void subdivide(BVH &bvh, const int node_idx, const std::vector<float3> &c
     const int count = bvh.nodes[node_idx].tri_count;
     if (count <= LEAF_SIZE) return;
 
-    // Split on centroids, since overlapping triangles still have distinct centres.
+    // Split on centroids, since overlapping triangles still have distinct centers.
     AABB cbox;
     for (int i = 0; i < count; ++i) cbox.grow(centroid[bvh.tri_index[first + i]]);
 

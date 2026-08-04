@@ -21,7 +21,7 @@ struct SequenceHeader {
     float fps;
 };
 
-// Which run of triangles belongs to which actor, and what colour it is.
+// Which run of triangles belongs to which actor, and what color it is.
 struct SequenceObject {
     uint32_t first_triangle;
     uint32_t triangle_count;

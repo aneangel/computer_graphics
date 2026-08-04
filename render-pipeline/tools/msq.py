@@ -50,8 +50,8 @@ def write_msq(path, faces, verts, fps=30.0, objects=None):
         f.write(struct.pack(_HEADER, magic, vertex_count, faces.shape[0], frame_count, fps))
         if objects is not None:
             f.write(struct.pack("<I", len(objects)))
-            for first, count, colour in objects:
-                f.write(struct.pack(_OBJECT, int(first), int(count), *[float(c) for c in colour]))
+            for first, count, color in objects:
+                f.write(struct.pack(_OBJECT, int(first), int(count), *[float(c) for c in color]))
         f.write(faces.tobytes())
         f.write(verts.tobytes())
 
@@ -105,6 +105,6 @@ if __name__ == "__main__":
     print(f"  bounds  min {lo.round(2)}  max {hi.round(2)}")
     if objects:
         print(f"  {len(objects)} objects")
-        for i, (first, count, colour) in enumerate(objects):
-            rgb = " ".join(f"{c:.2f}" for c in colour)
-            print(f"    {i:2d}  triangles {first:6d}..{first + count:<6d}  colour {rgb}")
+        for i, (first, count, color) in enumerate(objects):
+            rgb = " ".join(f"{c:.2f}" for c in color)
+            print(f"    {i:2d}  triangles {first:6d}..{first + count:<6d}  color {rgb}")
