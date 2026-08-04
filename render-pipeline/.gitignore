@@ -1,1 +1,11 @@
 build/
+cmake-build-*/
+.cache/
+*.ppm
+*.msq
+*.glb
+__pycache__/
+frames/
+scans/
+clips/
+*.tracks.json

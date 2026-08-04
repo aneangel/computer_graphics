@@ -1,17 +1,15 @@
 #ifndef BVH_H
 #define BVH_H
 
-// Bounding volume hierarchy: a binary tree of boxes, so a ray that misses a box
-// skips every triangle beneath it. Turns per-ray cost from linear in the
-// triangle count into logarithmic. Built on the host, traversed on the device.
+// Bounding volume hierarchy: a tree of boxes, so a ray that misses a box skips
+// every triangle under it. Built on the host, traversed on the device.
 
 #include <algorithm>
 #include <vector>
 #include "geom_gpu.cuh"
 #include "mesh.h"
 
-// 32 bytes, two aligned loads. tri_count == 0 marks an interior node, and
-// left_first is then the left child; the right child is always the next slot.
+// 32 bytes. tri_count of 0 means interior, and left_first is then the left child.
 struct BVHNode {
     float3 bmin;
     int left_first;
@@ -21,15 +19,13 @@ struct BVHNode {
 
 struct BVH {
     std::vector<BVHNode> nodes;
-    // Triangles are reordered as the tree builds, so each leaf owns a
-    // contiguous run of this array. Values index mesh.indices.
+    // Triangle order, reordered as the tree builds. Values index mesh.indices.
     std::vector<int> tri_index;
 };
 
 namespace bvh_detail {
 
-// Candidate splits are drawn from bins, which makes the build linear in the
-// triangle count for a tree that is nearly as good as testing every plane.
+// Splits are chosen from bins, which keeps the build linear in triangle count.
 constexpr int BIN_COUNT = 12;
 constexpr int LEAF_SIZE = 2;
 constexpr float EMPTY = 1e30f;
@@ -49,7 +45,7 @@ struct AABB {
         grow(b.hi);
     }
 
-    // Half the true surface area; the constant cancels in every comparison.
+        // Half the real surface area. The constant cancels in every comparison.
     float area() const {
         const float3 d = hi - lo;
         if (d.x < 0.0f) return 0.0f;
@@ -77,8 +73,7 @@ inline void subdivide(BVH &bvh, const int node_idx, const std::vector<float3> &c
     const int count = bvh.nodes[node_idx].tri_count;
     if (count <= LEAF_SIZE) return;
 
-    // Split on centroids, not triangle boxes: overlapping triangles still have
-    // distinct centres, so this keeps making progress where boxes would stall.
+    // Split on centroids, since overlapping triangles still have distinct centres.
     AABB cbox;
     for (int i = 0; i < count; ++i) cbox.grow(centroid[bvh.tri_index[first + i]]);
 
@@ -101,8 +96,7 @@ inline void subdivide(BVH &bvh, const int node_idx, const std::vector<float3> &c
             bin_box[b].grow(tri_box[t]);
         }
 
-        // One sweep from each end gives every plane both sides without
-        // rescanning the triangles per candidate.
+        // One sweep from each end gives both sides of every candidate plane.
         float left_area[BIN_COUNT - 1], right_area[BIN_COUNT - 1];
         int left_n[BIN_COUNT - 1], right_n[BIN_COUNT - 1];
 
@@ -124,8 +118,7 @@ inline void subdivide(BVH &bvh, const int node_idx, const std::vector<float3> &c
         }
 
         for (int i = 0; i < BIN_COUNT - 1; ++i) {
-            // Surface area heuristic: a ray's chance of entering a box scales
-            // with its area, so this is the expected triangle tests per ray.
+            // Surface area heuristic: expected triangle tests per ray.
             const float cost = left_area[i] * static_cast<float>(left_n[i]) +
                 right_area[i] * static_cast<float>(right_n[i]);
             if (cost < best_cost) {
@@ -197,8 +190,7 @@ inline BVH build_bvh(const Mesh &mesh) {
         bvh.tri_index[i] = i;
     }
 
-    // At most 2n-1 nodes, reserved so the vector never reallocates while the
-    // recursion holds indices into it.
+    // At most 2n minus 1 nodes, reserved so recursion never sees a reallocation.
     bvh.nodes.reserve(static_cast<size_t>(2 * tri_count - 1));
     bvh.nodes.push_back(BVHNode{});
     set_bounds(bvh, 0, 0, tri_count, tri_box);
@@ -206,9 +198,8 @@ inline BVH build_bvh(const Mesh &mesh) {
     return bvh;
 }
 
-// Recomputes bounds against moved vertices, keeping the tree's structure. Runs
-// backwards because children are pushed after their parent, so one reverse pass
-// visits both children first.
+// Rebounds the tree against moved vertices, keeping its structure. Runs backwards
+// so both children are always visited before their parent.
 inline void refit_bvh(BVH &bvh, const Mesh &mesh) {
     using namespace bvh_detail;
     for (int i = static_cast<int>(bvh.nodes.size()) - 1; i >= 0; --i) {

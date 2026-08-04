@@ -1,8 +1,7 @@
 #ifndef MESH_H
 #define MESH_H
 
-// Host-side triangle mesh, generated or read from an OBJ. render_gpu uploads
-// the three arrays and works from those.
+// Host side triangle mesh, generated or read from an OBJ.
 
 #include <cstdio>
 #include <cstdlib>
@@ -22,8 +21,7 @@ struct Mesh {
     size_t triangle_count() const { return indices.size(); }
 };
 
-// Area-weighted vertex normals: the raw cross product is proportional to twice
-// the face area, so accumulating it unnormalized weights big faces correctly.
+// Area weighted vertex normals. The raw cross product already carries the area.
 inline void recompute_normals(Mesh &m) {
     m.normals.assign(m.vertex_count(), make_float3(0.0f, 0.0f, 0.0f));
     for (const int3 &f : m.indices) {
@@ -44,7 +42,7 @@ inline void transform(Mesh &m, const float scale, const float3 &translate) {
     for (float3 &p : m.positions) p = p * scale + translate;
 }
 
-// Sphere on a latitude/longitude grid, slices around and stacks pole to pole.
+// Sphere on a latitude and longitude grid, slices around and stacks pole to pole.
 inline Mesh make_uv_sphere(const float3 &center, const float radius, const int slices,
     const int stacks) {
     Mesh m;
@@ -74,7 +72,7 @@ inline Mesh make_uv_sphere(const float3 &center, const float radius, const int s
     return m;
 }
 
-// Minimal OBJ reader: v, vn and f. Everything else on the line is skipped.
+// Minimal OBJ reader: v, vn and f. Everything else is skipped.
 inline Mesh load_obj(const std::string &path) {
     std::ifstream in(path);
     if (!in) {
@@ -106,8 +104,7 @@ inline Mesh load_obj(const std::string &path) {
             std::vector<int> corner;
             std::string token;
             while (ls >> token) {
-                // pos, pos/tex, pos//nrm and pos/tex/nrm all appear; turning
-                // slashes into spaces lets one parse handle every form.
+                // Turning slashes into spaces lets one parse handle every face form.
                 for (char &ch : token)
                     if (ch == '/') ch = ' ';
                 std::istringstream ts(token);

@@ -141,6 +141,24 @@ line[:, [J_LFOOT, J_RFOOT], 1] = 0.05
 R, tilt, _ = ground_alignment(line)
 check("upright figure stays upright", abs(tilt) < 1.0, f"tilt {tilt:.2f}deg")
 
+print("a subject standing on one spot is not levelled from posture")
+# Bent double with feet planted, where levelling from either cue stands him up.
+bent = standing(40)
+bent[:, [J_LFOOT, J_RFOOT], 0] = np.array([-0.10, 0.10])       # feet still
+bent[:, [J_LFOOT, J_RFOOT], 2] = 0.0
+bent[:, [J_LFOOT, J_RFOOT], 1] = 0.05
+bent[:, 15] = np.c_[np.zeros(40), np.full(40, 1.15), np.full(40, 0.55)]   # head forward
+
+def lean(j):
+    v = j[:, 15] - j[:, 0]
+    v = v / np.linalg.norm(v, axis=1, keepdims=True)
+    return np.degrees(np.arccos(np.clip(v[:, 1], -1, 1))).mean()
+
+R, tilt, _ = ground_alignment(bent)
+before, after = lean(bent), lean(bent @ R.T)
+check("declines to level", abs(tilt) < 1e-9, f"tilt {tilt:.1f}deg")
+check("the bend survives", abs(after - before) < 0.5, f"{before:.0f}deg -> {after:.0f}deg")
+
 print("implausible geometry is refused rather than guessed")
 absurd = base.copy()
 absurd[:, [J_LFOOT, J_RFOOT], 1] = np.linspace(0, 8, len(absurd))[:, None]  # feet up a wall
@@ -151,10 +169,20 @@ print("writer handoff")
 faces = np.array([[0, 1, 2], [0, 2, 3]], np.int32)
 path = os.path.join(TMP, "box.msq")
 write_msq(path, faces, out, 30.0)
-back_faces, back_verts, fps = read_msq(path)
+back_faces, back_verts, fps, objects = read_msq(path)
 check("faces survive", np.array_equal(back_faces, faces))
 check("positions survive", np.allclose(back_verts, out, atol=1e-6))
 check("fps survives", fps == 30.0)
+check("a file without objects reports none", objects is None)
+
+print("object table")
+scene = os.path.join(TMP, "scene.msq")
+colours = [(0.0, 0.2, 0.8), (0.9, 0.9, 0.9)]
+write_msq(scene, faces, out, 30.0, [(0, 1, colours[0]), (1, 1, colours[1])])
+_, _, _, back = read_msq(scene)
+check("objects survive", back is not None and len(back) == 2, f"got {back}")
+check("spans survive", [(o[0], o[1]) for o in back] == [(0, 1), (1, 1)])
+check("colours survive", np.allclose([o[2] for o in back], colours, atol=1e-6))
 
 print("rejects bad input")
 for name, fn in [
@@ -162,6 +190,13 @@ for name, fn in [
      lambda: write_msq(os.path.join(TMP, "x.msq"), np.array([[0, 1, 99]], np.int32), out, 30.0)),
     ("wrong vertex rank",
      lambda: write_msq(os.path.join(TMP, "x.msq"), faces, np.zeros((4, 3), np.float32), 30.0)),
+    # A gap here is a triangle with no colour, seen far from the tool that wrote it.
+    ("objects leaving a gap",
+     lambda: write_msq(os.path.join(TMP, "x.msq"), faces, out, 30.0,
+                       [(0, 1, (1, 1, 1))])),
+    ("objects overlapping",
+     lambda: write_msq(os.path.join(TMP, "x.msq"), faces, out, 30.0,
+                       [(0, 2, (1, 1, 1)), (1, 1, (1, 1, 1))])),
 ]:
     try:
         fn()

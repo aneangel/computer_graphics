@@ -18,27 +18,29 @@ constexpr int MAX_DEPTH = 4;
 constexpr float MIN_THROUGHPUT = 1e-3f;
 constexpr float SURFACE_EPS = 1e-3f;
 
-// 8x8 puts neighbouring pixels in the same warp, which keeps ray paths coherent.
+// 8x8 puts neighbouring pixels in one warp, which keeps ray paths coherent.
 constexpr int BLOCK_X = 8;
 constexpr int BLOCK_Y = 8;
 
-// Traversal depth limit, held in registers. log2(triangles) with huge margin.
+// Traversal stack depth, held in registers, with plenty of margin.
 constexpr int BVH_STACK = 64;
 constexpr float RAY_MISS = 1e30f;
 
 // Constant memory broadcasts to a whole warp in one cycle.
 __constant__ MeshView c_mesh;
+__constant__ Material c_materials[MAX_MATERIALS];
 __constant__ Light c_lights[MAX_LIGHTS];
 __constant__ Plane c_floor;
 __constant__ int c_light_count;
 
-// Device-owned mesh storage. Freed in shutdown().
+// Device owned mesh storage, freed in shutdown.
 float3 *d_positions = nullptr;
 float3 *d_normals = nullptr;
 int3 *d_indices = nullptr;
 BVHNode *d_nodes = nullptr;
 int *d_tri_index = nullptr;
-// Fixed for the run, so update_geometry() need not be told them again.
+int *d_tri_material = nullptr;
+// Fixed for the run, so update_geometry need not be told them again.
 size_t g_vertex_bytes = 0;
 size_t g_order_bytes = 0;
 
@@ -57,8 +59,7 @@ struct Hit {
     float t;
 };
 
-// Moller-Trumbore. u and v come out as barycentric weights for free, which is
-// what lets the same numbers blend the three corner normals for smooth shading.
+// Moller Trumbore. u and v fall out as barycentric weights, which smooth shading uses.
 __device__ bool triangle_hit(const float3 &a, const float3 &b, const float3 &c, const float3 &origin,
     const float3 &dir, float &t, float &u, float &v) {
     const float3 e1 = b - a;
@@ -66,7 +67,7 @@ __device__ bool triangle_hit(const float3 &a, const float3 &b, const float3 &c, 
     const float3 p = cross(dir, e2);
     const float det = dot(e1, p);
 
-    // Magnitude not sign, which keeps the triangle double-sided.
+    // Magnitude not sign, which keeps the triangle two sided.
     if (fabsf(det) < 1e-8f) return false;
 
     const float inv_det = 1.0f / det;
@@ -77,15 +78,14 @@ __device__ bool triangle_hit(const float3 &a, const float3 &b, const float3 &c, 
 
     const float3 q = cross(tv, e1);
     v = dot(dir, q) * inv_det;
-    // u + v > 1 puts the point past the edge joining b and c.
+    // u plus v above 1 puts the point past the edge joining b and c.
     if (v < 0.0f || u + v > 1.0f) return false;
 
     t = dot(e2, q) * inv_det;
     return t > 0.0f;
 }
 
-// Slab test, returning entry distance so the caller can order the children. A
-// zero direction component gives NaN, which fminf and fmaxf discard by design.
+// Slab test returning entry distance, so the caller can order the two children.
 __device__ float ray_box(const float3 &bmin, const float3 &bmax, const float3 &origin,
     const float3 &inv_dir, const float max_dist) {
     const float tx1 = (bmin.x - origin.x) * inv_dir.x, tx2 = (bmax.x - origin.x) * inv_dir.x;
@@ -96,12 +96,11 @@ __device__ float ray_box(const float3 &bmin, const float3 &bmax, const float3 &o
     const float tz1 = (bmin.z - origin.z) * inv_dir.z, tz2 = (bmax.z - origin.z) * inv_dir.z;
     tmin = fmaxf(tmin, fminf(tz1, tz2));
     tmax = fminf(tmax, fmaxf(tz1, tz2));
-    // tmax > 0 rejects boxes entirely behind the ray.
+    // Requiring tmax above 0 rejects boxes entirely behind the ray.
     return (tmax >= tmin && tmin < max_dist && tmax > 0.0f) ? fmaxf(tmin, 0.0f) : RAY_MISS;
 }
 
 // Nearest child first, far child only if it could still hold something closer.
-// That ordering, not the boxes alone, is most of why a BVH is fast.
 __device__ bool mesh_intersect(const float3 &origin, const float3 &dir, float &best, int &best_tri,
     float &best_u, float &best_v) {
     const float3 inv_dir = make_float3(1.0f / dir.x, 1.0f / dir.y, 1.0f / dir.z);
@@ -160,7 +159,7 @@ __device__ bool mesh_intersect(const float3 &origin, const float3 &dir, float &b
     return found;
 }
 
-// Closest-hit query. Records an index and resolves the surface once at the end.
+// Closest hit query. Records an index and resolves the surface once at the end.
 __device__ bool scene_intersect(const float3 &origin, const float3 &dir, const bool smooth_normals,
     Hit &hit) {
     float best = 1e30f;
@@ -195,7 +194,7 @@ __device__ bool scene_intersect(const float3 &origin, const float3 &dir, const b
     } else {
         const int3 f = c_mesh.indices[best_tri];
         if (smooth_normals) {
-            // Weighted average of the corner normals; the silhouette stays faceted.
+            // Weighted average of the corner normals. The silhouette stays faceted.
             const float w = 1.0f - best_u - best_v;
             hit.normal = normalize(c_mesh.normals[f.x] * w + c_mesh.normals[f.y] * best_u +
                 c_mesh.normals[f.z] * best_v);
@@ -203,14 +202,15 @@ __device__ bool scene_intersect(const float3 &origin, const float3 &dir, const b
             hit.normal = normalize(cross(c_mesh.positions[f.y] - c_mesh.positions[f.x],
                 c_mesh.positions[f.z] - c_mesh.positions[f.x]));
         }
-        // Double-sided hits can face away from the ray; flipping keeps them lit.
+        // Two sided hits can face away from the ray, so flipping keeps them lit.
         if (dot(hit.normal, dir) > 0.0f) hit.normal = -hit.normal;
-        hit.material = c_mesh.material;
+        // best_tri is the pre BVH index, which is what the table is keyed on.
+        hit.material = c_materials[c_mesh.tri_material ? c_mesh.tri_material[best_tri] : 0];
     }
     return true;
 }
 
-// Any-hit walk. The first occluder ends the query, so children are not sorted.
+// Any hit walk. The first occluder ends the query, so children are not sorted.
 __device__ bool mesh_occluded(const float3 &origin, const float3 &dir, const float max_dist) {
     const float3 inv_dir = make_float3(1.0f / dir.x, 1.0f / dir.y, 1.0f / dir.z);
     int stack[BVH_STACK];
@@ -254,7 +254,7 @@ __device__ bool mesh_occluded(const float3 &origin, const float3 &dir, const flo
     return false;
 }
 
-// Any-hit query for shadow rays: returns on the first occluder found.
+// Any hit query for shadow rays, returning on the first occluder found.
 __device__ bool scene_occluded(const float3 &origin, const float3 &dir, const float max_dist) {
     if (mesh_occluded(origin, dir, max_dist)) return true;
 
@@ -279,8 +279,7 @@ __device__ float3 offset_origin(const float3 &point, const float3 &normal, const
     return point + normal * (dot(dir, normal) < 0.0f ? -SURFACE_EPS : SURFACE_EPS);
 }
 
-// throughput is the running product of reflectivities, so the loop can stop
-// once further bounces cannot change the result.
+// throughput is the running product of reflectivities, so faint bounces stop early.
 __device__ float3 trace(float3 origin, float3 dir, const bool smooth_normals, RNG &rng) {
     float3 radiance = make_float3(0.0f, 0.0f, 0.0f);
     float throughput = 1.0f;
@@ -343,11 +342,11 @@ __global__ void render_kernel(float4 *accum, uint32_t *out, const int width, con
     }
     sum = sum * (1.0f / static_cast<float>(spp));
 
-    // Running average across frames; .w holds the sample count.
+    // Running average across frames, with w holding the sample count.
     const float4 acc = frame == 0 ? to_float4(sum, 1.0f) : accum[idx] + to_float4(sum, 1.0f);
     accum[idx] = acc;
 
-    // Gamma only; this scene has little range above 1.0 to tone map.
+    // Gamma only, since this scene has little range above 1 to tone map.
     const float3 average = xyz(acc) * (1.0f / acc.w);
     out[idx] = pack_argb8888(linear_to_srgb(average));
 }
@@ -357,7 +356,8 @@ __global__ void render_kernel(float4 *accum, uint32_t *out, const int width, con
 namespace gpu {
 
 void init(const int width, const int height, const Mesh &mesh, const BVH &bvh,
-    const Material &mesh_material, const std::vector<Light> &lights, const Plane &floor) {
+    const std::vector<Material> &materials, const std::vector<int> &tri_material,
+    const std::vector<Light> &lights, const Plane &floor) {
     g_width = width;
     g_height = height;
 
@@ -366,13 +366,32 @@ void init(const int width, const int height, const Mesh &mesh, const BVH &bvh,
         std::fprintf(stderr, "scene exceeds constant memory capacity\n");
         std::exit(1);
     }
+    if (materials.empty() || materials.size() > MAX_MATERIALS) {
+        std::fprintf(stderr, "scene needs 1 to %d materials, got %zu\n", MAX_MATERIALS,
+            materials.size());
+        std::exit(1);
+    }
+    // Out of range would read past the constant bank on the device, silently.
+    if (!tri_material.empty()) {
+        if (tri_material.size() != mesh.triangle_count()) {
+            std::fprintf(stderr, "%zu material indices for %zu triangles\n", tri_material.size(),
+                mesh.triangle_count());
+            std::exit(1);
+        }
+        for (const int m : tri_material) {
+            if (m < 0 || m >= static_cast<int>(materials.size())) {
+                std::fprintf(stderr, "material index %d outside the %zu supplied\n", m,
+                    materials.size());
+                std::exit(1);
+            }
+        }
+    }
     if (mesh.triangle_count() == 0) {
         std::fprintf(stderr, "mesh has no triangles\n");
         std::exit(1);
     }
 
-    // The mesh goes to global memory, then a descriptor naming it goes to
-    // constant memory. Only the descriptor is small enough for the bank.
+    // Mesh to global memory, then a descriptor naming it to constant memory.
     const size_t vertex_bytes = mesh.vertex_count() * sizeof(float3);
     const size_t index_bytes = mesh.triangle_count() * sizeof(int3);
     CUDA_CHECK(cudaMalloc(&d_positions, vertex_bytes));
@@ -382,9 +401,7 @@ void init(const int width, const int height, const Mesh &mesh, const BVH &bvh,
     CUDA_CHECK(cudaMemcpy(d_normals, mesh.normals.data(), vertex_bytes, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_indices, mesh.indices.data(), index_bytes, cudaMemcpyHostToDevice));
 
-    // Built by the caller. Its structure is fixed from here on.
-    // Sized for the 2n-1 maximum so a later rebuild, which may land on a
-    // different node count, still fits without reallocating.
+    // Sized for the maximum, so a later rebuild always fits without reallocating.
     const size_t max_nodes = static_cast<size_t>(2 * mesh.triangle_count() - 1);
     const size_t order_bytes = bvh.tri_index.size() * sizeof(int);
     CUDA_CHECK(cudaMalloc(&d_nodes, max_nodes * sizeof(BVHNode)));
@@ -404,9 +421,18 @@ void init(const int width, const int height, const Mesh &mesh, const BVH &bvh,
     view.nodes = d_nodes;
     view.tri_index = d_tri_index;
     view.triangle_count = static_cast<int>(mesh.triangle_count());
-    view.material = mesh_material;
+
+    // Left null when the mesh is all one material, which spares the lookup.
+    if (!tri_material.empty()) {
+        CUDA_CHECK(cudaMalloc(&d_tri_material, tri_material.size() * sizeof(int)));
+        CUDA_CHECK(cudaMemcpy(d_tri_material, tri_material.data(),
+            tri_material.size() * sizeof(int), cudaMemcpyHostToDevice));
+        view.tri_material = d_tri_material;
+    }
 
     CUDA_CHECK(cudaMemcpyToSymbol(c_mesh, &view, sizeof(MeshView)));
+    CUDA_CHECK(cudaMemcpyToSymbol(c_materials, materials.data(),
+        materials.size() * sizeof(Material)));
     CUDA_CHECK(cudaMemcpyToSymbol(c_lights, lights.data(), light_count * sizeof(Light)));
     CUDA_CHECK(cudaMemcpyToSymbol(c_floor, &floor, sizeof(Plane)));
     CUDA_CHECK(cudaMemcpyToSymbol(c_light_count, &light_count, sizeof(int)));
@@ -422,14 +448,13 @@ void init(const int width, const int height, const Mesh &mesh, const BVH &bvh,
 }
 
 void update_geometry(const Mesh &mesh, const BVH &bvh) {
-    // Sizes never change, so the constant-memory descriptor stays valid.
+    // Sizes never change, so the constant memory descriptor stays valid.
     CUDA_CHECK(cudaMemcpy(d_positions, mesh.positions.data(), g_vertex_bytes,
         cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_normals, mesh.normals.data(), g_vertex_bytes, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_nodes, bvh.nodes.data(), bvh.nodes.size() * sizeof(BVHNode),
         cudaMemcpyHostToDevice));
-    // A rebuild reorders triangles, a refit does not; sending it always costs
-    // four bytes per triangle and saves the caller having to say which it is.
+    // Sent always, since a rebuild reorders triangles and a refit does not.
     CUDA_CHECK(cudaMemcpy(d_tri_index, bvh.tri_index.data(), g_order_bytes,
         cudaMemcpyHostToDevice));
 }
@@ -460,6 +485,7 @@ void shutdown() {
     cudaFree(d_indices);
     cudaFree(d_nodes);
     cudaFree(d_tri_index);
+    cudaFree(d_tri_material);  // null when the mesh is all one material
     cudaFree(d_accum);
     cudaFree(d_pixels);
     cudaFreeHost(h_pixels);

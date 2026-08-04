@@ -218,8 +218,7 @@ def bake(path, fps=30.0, max_frames=0):
 
     for f in range(frames):
         world = global_transforms(g, sample_animation(g, animation, f / fps))
-        # Undo the mesh node's placement, apply the joint's current transform,
-        # then undo where that joint sat when the skin was bound.
+        # Undo the mesh placement, apply the joint, undo the bind pose.
         inverse_mesh = np.linalg.inv(world[node_index])
         matrices = np.stack([
             inverse_mesh @ world[j] @ ibm[k] for k, j in enumerate(skin["joints"])

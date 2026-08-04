@@ -10,6 +10,8 @@
 !/.gitignore
 !/CMakeLists.txt
 !/src/**
+!/README.md
+!/docs/**
 
 # Build trees: re-ignored as whole directories so git doesn't walk them at all.
 /build/

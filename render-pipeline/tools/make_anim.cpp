@@ -1,5 +1,4 @@
-// Writes a test mesh sequence. The renderer and this meet only at the .msq
-// format, so anything that writes vertex positions can replace it.
+// Writes a test mesh sequence, meeting the renderer only at the .msq format.
 //
 //   make-anim out.msq [model.obj] [frames]
 

@@ -62,10 +62,8 @@ if [ ! -f "$MSQ" ] || [ "$SOURCE" -nt "$MSQ" ]; then
             python "$ROOT/tools/gltf_to_msq.py" "$SOURCE" --out "$MSQ"
             ;;
         *.zip)
-            # Motion-X ships each subset twice under one name, as video and as
-            # motion, so check the contents before anything else.
-            # Matched with case, not grep -q: under pipefail an early grep exit
-            # SIGPIPEs the producer and the pipeline fails on a successful match.
+            # Motion-X ships video and motion under one name, so check the contents.
+            # Matched with case, since grep -q would SIGPIPE the producer under pipefail.
             LISTING=$(unzip -l "$SOURCE" 2>/dev/null || true)
             case "$LISTING" in
                 *.npy*) ;;

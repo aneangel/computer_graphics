@@ -1,13 +1,14 @@
 #ifndef SCENE_H
 #define SCENE_H
 
-// Scene types shared by host and device. All POD, so they copy straight into
-// __constant__ memory.
+// Scene types shared by host and device. All POD, so they copy into constant memory.
 
 #include "bvh.h"
 #include "geom_gpu.cuh"
 
 constexpr int MAX_LIGHTS = 8;
+// One per actor in shot, well past any scene worth reconstructing.
+constexpr int MAX_MATERIALS = 32;
 
 struct Material {
     float3 diffuse_color;
@@ -28,7 +29,7 @@ struct Light {
     float radius;  // 0 gives hard shadows, above 0 gives soft ones
 };
 
-// Finite checkerboard floor, kept analytic so anything slow is the mesh.
+// Finite checkerboard floor, kept analytic so the only slow thing is the mesh.
 struct Plane {
     float y;
     float half_extent_x;
@@ -38,16 +39,16 @@ struct Plane {
     Material material;
 };
 
-// Only this descriptor lives in constant memory; the arrays it points at are in
-// global memory, being far too large for the 64 KB bank.
+// Only this descriptor sits in constant memory; its arrays are global.
 struct MeshView {
     const float3 *positions;
     const float3 *normals;
     const int3 *indices;
     const BVHNode *nodes;
     const int *tri_index;
+    // One material index per triangle, or null when the mesh is all material zero.
+    const int *tri_material;
     int triangle_count;
-    Material material;
 };
 
 struct Camera {
@@ -71,7 +72,7 @@ inline Camera make_camera(const float3 position, const float3 target, const floa
     return c;
 }
 
-// px/py are continuous, so passing x + jitter anti-aliases.
+// px and py are continuous, so passing x plus jitter anti aliases.
 GPU_FN float3 camera_ray(const Camera &c, const float px, const float py, const int width,
     const int height) {
     const float sx = (2.0f * px / static_cast<float>(width) - 1.0f) * c.fov_scale * c.aspect;

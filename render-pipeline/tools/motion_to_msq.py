@@ -1,14 +1,13 @@
-"""Turn SMPL / SMPL-X motion parameters into a mesh sequence the renderer reads.
+"""Turn SMPL and SMPL-X motion parameters into a mesh sequence the renderer reads.
 
-Runs the body model forward on shape, pose and translation, then writes a .msq.
-Nothing downstream of here knows what SMPL is.
+Runs the body model forward, then writes a .msq. Nothing downstream knows what
+SMPL is.
 
     python tools/motion_to_msq.py kungfu.zip --clip Kung_Fu_Flying_Kick_1_clip3 \
         --model-path ~/models --out kick.msq
 
-Reads AMASS .npz (SMPL) and Motion-X (T, 322) arrays (SMPL-X). Needs `pip
-install smplx` and the model files, which are behind a registration form at
-https://smpl-x.is.tue.mpg.de
+Reads AMASS .npz and Motion-X (T, 322) arrays. Needs `pip install smplx` and the
+model files, which are behind a form at https://smpl-x.is.tue.mpg.de
 """
 
 import argparse
@@ -23,7 +22,7 @@ import numpy.lib.format as npy_format
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from msq import write_msq  # noqa: E402
 
-# Motion-X packs one row per frame; these must sum to the row width.
+# Motion-X packs one row per frame, and these must sum to the row width.
 MOTIONX_FIELDS = [
     ("root_orient", 3),
     ("pose_body", 63),
@@ -41,7 +40,7 @@ def load_motion(path):
     """Sniff the layout and return a dict of arrays plus the model type."""
     raw = np.load(path, allow_pickle=True)
 
-    # Motion-X: a single (T, 322) block, either bare or under one key.
+    # Motion-X is a single (T, 322) block, either bare or under one key.
     array = None
     if isinstance(raw, np.ndarray):
         array = raw
@@ -81,7 +80,7 @@ def load_motion(path):
 
     return {
         "root_orient": poses[:, :3],
-        # SMPL has 23 joints past the root; AMASS stores hands after those.
+        # SMPL has 23 joints past the root, and AMASS stores hands after those.
         "pose_body": poses[:, 3:72],
         "trans": raw["trans"].astype(np.float32),
         "betas": raw["betas"].astype(np.float32)[:10],
@@ -138,11 +137,10 @@ def open_clip(path, clip):
 
 
 def detect_up(joints, pelvis=0, head=15):
-    """Up axis and sign, from the mean pelvis-to-head vector.
+    """Up axis and sign, from the mean pelvis to head vector.
 
-    Bounding boxes fail here because a clip of someone leaping is horizontal
-    much of the time, making the widest axis the direction of travel. Format
-    alone is no guide either: Motion-X ships -z-up, AMASS +z-up, SMPL-X y-up.
+    A bounding box fails here, since a leap is horizontal much of the time.
+    Format is no guide either, as every source ships a different convention.
     """
     direction = (joints[:, head] - joints[:, pelvis]).mean(axis=0)
     axis = int(np.argmax(np.abs(direction)))
@@ -162,7 +160,7 @@ def rotation_between(a, b):
     if s < 1e-9:
         if c > 0:
             return np.eye(3)
-        # Antiparallel: any perpendicular axis will do for the half turn.
+        # Antiparallel, so any perpendicular axis will do for the half turn.
         perp = np.array([1.0, 0.0, 0.0])
         if abs(a[0]) > 0.9:
             perp = np.array([0.0, 1.0, 0.0])
@@ -174,14 +172,12 @@ def rotation_between(a, b):
     return np.eye(3) + K + K @ K * ((1.0 - c) / (s * s))
 
 
-def ground_alignment(joints, max_tilt=50.0):
+def ground_alignment(joints, max_tilt=50.0, min_spread=0.05):
     """Rotation that stands the body on a level floor, facing the camera.
 
-    Video-recovered motion inherits the camera's idea of level, which is rarely
-    level. Up is fitted to the plane the feet have been touching rather than
-    taken from posture, since someone kicking is not vertical but the floor
-    never moves. Facing comes from the hips, so it works for a subject standing
-    on one spot. Returns (rotation, tilt_degrees, yaw_degrees).
+    Up is fitted to the plane the feet touched, since a kick is not vertical but
+    a floor never moves. Facing comes from the hips. Returns the rotation, the
+    tilt in degrees, and the yaw in degrees.
     """
     feet = joints[:, [J_LFOOT, J_RFOOT]].reshape(-1, 3)
     low = feet[feet[:, 1] <= np.quantile(feet[:, 1], 0.25)]
@@ -190,19 +186,17 @@ def ground_alignment(joints, max_tilt=50.0):
     if len(low) >= 3:
         # The normal is the direction of least spread in the contact points.
         centred = low - low.mean(axis=0)
-        _u, spread, basis = np.linalg.svd(centred, full_matrices=False)
-        # A line lies in infinitely many planes, so require real spread in the
-        # second direction before trusting the fit.
-        if spread[1] > 0.05 * spread[0]:
+        _u, singular, basis = np.linalg.svd(centred, full_matrices=False)
+        spread = singular / np.sqrt(len(low))  # metres, independent of frame count
+        # A line of contacts fixes no plane, and a tiny patch of them is noise.
+        if spread[1] > 0.05 * spread[0] and spread[1] > min_spread:
             normal = basis[-1]
+            if normal[1] < 0.0:
+                normal = -normal
 
     if normal is None:
-        # No usable ground; the body axis is weaker but beats a made-up plane.
-        normal = (joints[:, J_HEAD] - joints[:, J_PELVIS]).mean(axis=0)
-        normal = normal / max(float(np.linalg.norm(normal)), 1e-9)
-
-    if normal[1] < 0.0:
-        normal = -normal
+        # Nothing to level against, and posture is no substitute, so leave it alone.
+        return _facing_only(joints)
 
     tilt = float(np.degrees(np.arccos(np.clip(normal[1], -1.0, 1.0))))
     if tilt > max_tilt:
@@ -210,8 +204,17 @@ def ground_alignment(joints, max_tilt=50.0):
 
     level = rotation_between(normal, np.array([0.0, 1.0, 0.0]))
 
-    # The hip axis is perpendicular to facing, so crossing it with up gives
-    # forward. Averaged so one turn of the torso does not decide the shot.
+    return _apply_facing(joints, level, tilt)
+
+
+def _facing_only(joints):
+    """Turn the subject to face the camera without touching the tilt."""
+    return _apply_facing(joints, np.eye(3), 0.0)
+
+
+def _apply_facing(joints, level, tilt):
+    """Compose `level` with a turn about the vertical so the body faces +Z."""
+    # The hip axis crossed with up gives forward, averaged over the whole clip.
     hips = joints[:, J_RHIP] - joints[:, J_LHIP]
     hips = hips @ level.T
     hips /= np.maximum(np.linalg.norm(hips, axis=1, keepdims=True), 1e-9)
@@ -231,7 +234,7 @@ def ground_alignment(joints, max_tilt=50.0):
 
 
 def orient_to_y_up(verts, axis, sign):
-    """Quarter-turn step fixing which axis is up; lean is ground_alignment's job."""
+    """Quarter turn fixing which axis is up. Lean is ground_alignment's job."""
     x, y, z = verts[..., 0], verts[..., 1], verts[..., 2]
     return {
         (0, 1.0): lambda: np.stack([-y, x, z], -1),
@@ -244,10 +247,7 @@ def orient_to_y_up(verts, axis, sign):
 
 
 def to_vertices(motion, model_path, chunk=128):
-    """Run the body model forward. Returns (verts, faces, joints).
-
-    Face and jaw parameters are skipped: a few pixels at any sensible framing.
-    """
+    """Run the body model forward. Face and jaw are skipped as too small to see."""
     try:
         import smplx
         import torch
@@ -281,8 +281,7 @@ def to_vertices(motion, model_path, chunk=128):
         stop = min(start + chunk, frames)
 
         def slab(name):
-            # The model is built for a fixed batch size, so the final partial
-            # chunk is padded by repeating its last frame and trimmed after.
+            # Fixed batch size, so the last chunk is padded then trimmed.
             a = torch.from_numpy(motion[name][start:stop])
             if a.shape[0] < chunk:
                 a = torch.cat([a, a[-1:].repeat(chunk - a.shape[0], 1)], dim=0)
@@ -309,19 +308,17 @@ def to_vertices(motion, model_path, chunk=128):
 
 
 def place_in_scene(verts, up="z", height=6.0, centre=(0.0, -16.0), floor_y=-4.0):
-    """Fit the sequence into the default scene.
+    """Fit the sequence into the default scene, once over every frame.
 
-    Scale and offset are computed once over every frame. Fitting each frame
-    would cancel the motion and leave a walking figure jogging on the spot.
+    Per frame fitting would cancel the motion and leave a walker on the spot.
     """
     if up == "z":
-        # Body models are usually authored Z-up; the renderer is Y-up.
+        # Body models are usually authored z up, and the renderer is y up.
         verts = np.stack([verts[..., 0], verts[..., 2], -verts[..., 1]], axis=-1)
     elif up != "y":
         raise ValueError("up must be 'z' or 'y'")
 
-    # Median height of one frame, not the sequence's swept volume: a clip with
-    # a jump sweeps far more vertical space than the person occupies.
+    # Median height of one frame, since a jump sweeps more space than a body fills.
     per_frame = np.median(verts[..., 1].max(axis=1) - verts[..., 1].min(axis=1))
     scale = height / max(float(per_frame), 1e-6)
 

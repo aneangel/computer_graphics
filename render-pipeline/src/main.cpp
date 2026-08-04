@@ -2,10 +2,12 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
+#include <unistd.h>
 #include <SDL2/SDL.h>
 #include "anim.h"
 #include "bvh.h"
@@ -14,26 +16,27 @@
 #include "scene.h"
 
 namespace {
-    // With a BVH the cost is driven by pixels, not by mesh size.
+    // Output size. With a BVH the cost follows pixels, not triangles.
     constexpr int width = 1280;
     constexpr int height = 720;
-    constexpr float fov = M_PI / 2;
+    // Vertical field of view. Narrow enough that a wide scene still reads.
+    constexpr float fov = M_PI / 3;
 
-    // An animated frame cannot reuse the last frame's samples, so this is the
-    // whole anti-aliasing budget during playback.
+    // Samples per pixel during playback, where each frame starts from nothing.
     constexpr int samples_per_frame = 4;
-    // Offline renders are not racing anything, so they can afford far more.
+    // Samples per pixel offline, where there is time to spare.
     constexpr int offline_samples = 64;
 
     const float3 world_up = make_float3(0, 1, 0);
     const float3 mesh_center = make_float3(0.0f, 0.0f, -16.0f);
     constexpr float mesh_radius = 3.0f;
 
+    // View direction from yaw and pitch.
     float3 forward_from_angles(const float yaw, const float pitch) {
         return make_float3(cosf(pitch) * sinf(yaw), sinf(pitch), -cosf(pitch) * cosf(yaw));
     }
 
-    // OBJ carries no unit convention, so imported models arrive any size.
+    // Scales and centres a loaded model, which arrives in no particular units.
     void fit_into(Mesh &m, const float3 &center, const float radius) {
         float3 lo = m.positions[0], hi = m.positions[0];
         for (const float3 &p : m.positions) {
@@ -43,13 +46,47 @@ namespace {
         const float3 mid = (lo + hi) * 0.5f;
         const float extent = fmaxf(1e-6f, max_component(hi - lo) * 0.5f);
         const float scale = radius / extent;
-        // transform() scales about the origin, so the offset has to be scaled too.
+        // transform() scales about the origin, so the offset scales too.
         transform(m, scale, center - mid * scale);
     }
 
+    // Camera as a point to look at and an angle to look from, so it can orbit.
+    struct View {
+        float3 centre;
+        float distance;
+        float elevation;
+        float azimuth;
+    };
+
+    // The camera `turn` radians around the view.
+    Camera camera_at(const View &v, const float turn) {
+        const float a = v.azimuth + turn;
+        const float3 offset = make_float3(sinf(a) * cosf(v.elevation), sinf(v.elevation),
+            cosf(a) * cosf(v.elevation));
+        return make_camera(v.centre + offset * v.distance, v.centre, world_up, fov, width, height);
+    }
+
+    // Picks a view that fits the given bounds in frame.
+    View frame_camera(const float3 &lo, const float3 &hi) {
+        const float3 centre = (lo + hi) * 0.5f;
+        const float3 extent = hi - lo;
+        const float aspect = static_cast<float>(width) / static_cast<float>(height);
+        const float tan_half = tanf(fov * 0.5f);
+
+        // Fits the box rather than a sphere round it, which wastes less picture.
+        const float for_width = extent.x * 0.5f / (tan_half * aspect);
+        const float for_height = extent.y * 0.5f / tan_half;
+        // Plus half the depth, so the camera clears the near end of the scene.
+        const float distance = fmaxf(for_width, for_height) * 1.1f + extent.z * 0.5f;
+
+        // Raised a little, which shows how things are arranged in depth.
+        return View{centre, fmaxf(1e-3f, distance), atanf(0.38f), 0.0f};
+    }
+
+    // Writes one frame as a binary PPM.
     void save_ppm(const uint32_t *pixels, const std::string &filename) {
         std::ofstream ofs(filename, std::ios::binary);
-        // Otherwise a missing directory reports success having written nothing.
+        // Without this a missing directory reports success having written nothing.
         if (!ofs) {
             std::cerr << "cannot write " << filename << " (does the directory exist?)\n";
             std::exit(1);
@@ -64,8 +101,7 @@ namespace {
         ofs.write(rgb.data(), static_cast<std::streamsize>(rgb.size()));
     }
 
-    // Refitting costs ~4 ms against ~220 ms to rebuild but yields a tree ~8x
-    // slower to traverse, so it only wins while few samples are drawn from it.
+    // Moves to one frame of a sequence. Rebuilding gives a faster tree than refitting.
     void advance_to(MeshSequence &seq, const int index, Mesh &mesh, BVH &bvh, const bool rebuild) {
         seq.read_frame(index, mesh);  // also recomputes normals
         if (rebuild)
@@ -75,35 +111,85 @@ namespace {
         gpu::update_geometry(mesh, bvh);
     }
 
-    // Frames to numbered files, no window. Nothing here is racing a display.
-    int render_offline(MeshSequence &seq, Mesh &mesh, BVH &bvh, const std::string &out_dir) {
-        const Camera camera = make_camera(make_float3(0, 0, 0), make_float3(0, 0, -1), world_up,
-            fov, width, height);
+    // True if the path names a video rather than a mesh or a sequence.
+    bool has_video_extension(const std::string &path) {
+        for (const char *ext : {".mp4", ".mov", ".avi", ".mkv", ".webm"}) {
+            const size_t n = std::string(ext).size();
+            if (path.size() > n && path.compare(path.size() - n, n, ext) == 0) return true;
+        }
+        return false;
+    }
 
-        for (int f = 0; f < seq.frame_count(); ++f) {
-            // Offline: many samples per frame, so a better tree repays its build.
-            advance_to(seq, f, mesh, bvh, true);
+    // Directory the binary lives in, so the tools beside it are always findable.
+    std::string exe_dir() {
+        char buf[4096];
+        const ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+        if (n <= 0) return ".";
+        buf[n] = '\0';
+        const std::string path(buf);
+        return path.substr(0, path.find_last_of('/'));
+    }
 
-            // Geometry is frozen, so the accumulator converges as it does when
-            // the camera holds still.
+    // Runs the reconstruction over a video and returns the sequence it wrote.
+    std::string convert_video(const std::string &video) {
+        const std::string root = exe_dir() + "/..";
+        const std::string name = video.substr(video.find_last_of('/') + 1);
+        const std::string stem = name.substr(0, name.find_last_of('.'));
+        const std::string out = root + "/.cache/" + stem + ".msq";
+
+        std::ifstream cached(out, std::ios::binary);
+        if (cached.good()) {
+            std::printf("cached: %s\n", out.c_str());
+            return out;
+        }
+
+        // A subprocess, because the estimator is a large Python stack.
+        const std::string cmd = "python3 '" + root + "/tools/video_to_scene.py' '" + video +
+            "' --out '" + out + "' --work '" + root + "/.cache/" + stem + ".work'";
+        std::printf("reconstructing %s\n", video.c_str());
+        if (std::system(cmd.c_str()) != 0) {
+            std::cerr << "reconstruction failed. see tools/video_to_scene.py --help\n";
+            std::exit(1);
+        }
+        return out;
+    }
+
+    // Frames to numbered files, no window needed.
+    int render_offline(MeshSequence &seq, Mesh &mesh, BVH &bvh, const std::string &out_dir,
+        const View &view, const bool animated, const float turns, const int samples) {
+        // A still model has no length of its own, so an orbit is what gives it one.
+        const int frames = animated ? seq.frame_count() : (turns > 0.0f ? 120 : 1);
+        for (int f = 0; f < frames; ++f) {
+            // Many samples per frame here, so a rebuilt tree repays its cost.
+            if (animated) advance_to(seq, f, mesh, bvh, true);
+
+            const float turn = frames > 1
+                ? turns * 2.0f * static_cast<float>(M_PI) * static_cast<float>(f) /
+                    static_cast<float>(frames)
+                : 0.0f;
+            const Camera camera = camera_at(view, turn);
+
+            // Nothing moves within a frame, so the average keeps converging.
             const uint32_t *pixels = nullptr;
-            for (int s = 0; s < offline_samples; ++s) pixels = gpu::render(camera, s, 1, true);
+            for (int s = 0; s < samples; ++s) pixels = gpu::render(camera, s, 1, true);
 
             char name[512];
             std::snprintf(name, sizeof(name), "%s/frame_%04d.ppm", out_dir.c_str(), f);
             save_ppm(pixels, name);
-            std::printf("\rframe %d/%d", f + 1, seq.frame_count());
+            std::printf("\rframe %d/%d", f + 1, frames);
             std::fflush(stdout);
         }
-        std::printf("\nwrote %d frames to %s at %.0f fps\n", seq.frame_count(), out_dir.c_str(),
-            seq.fps());
+        std::printf("\nwrote %d frames to %s at %.0f fps\n", frames, out_dir.c_str(),
+            animated ? seq.fps() : 0.0f);
         gpu::shutdown();
         return 0;
     }
 }
 
 int main(int argc, char **argv) {
-    const std::string input = argc > 1 ? argv[1] : "";
+    std::string input = argc > 1 ? argv[1] : "";
+    // A video becomes a sequence first, then is handled like any other.
+    if (has_video_extension(input)) input = convert_video(input);
     const bool animated = has_sequence_extension(input);
 
     Mesh mesh;
@@ -129,25 +215,59 @@ int main(int argc, char **argv) {
     // colour, diffuse albedo, specular albedo, reflectivity, specular exponent
     const Material ivory = make_material(make_float3(0.4f, 0.4f, 0.3f), 0.6f, 0.3f, 0.1f, 50.0f);
 
-    // Last field is the light's radius: 0 gives hard shadows, above 0 gives soft ones.
+    // A scene gives a colour per actor; how it shades is decided here.
+    std::vector<Material> materials{ivory};
+    std::vector<int> tri_material;
+    if (animated && sequence.objects().size() > 1) {
+        materials.clear();
+        for (const SequenceObject &o : sequence.objects()) {
+            Material m = ivory;
+            m.diffuse_color = o.color;
+            materials.push_back(m);
+        }
+        tri_material = sequence.triangle_materials();
+        std::printf("%zu objects\n", materials.size());
+    }
+
+    // Last field is the light's radius: 0 gives hard shadows, above 0 soft ones.
     std::vector<Light> lights = {
         {make_float3(-20.0f, 20.0f, 20.0f), 1.5f, 0.0f},
         {make_float3(30.0f, 50.0f, -25.0f), 1.8f, 0.0f},
         {make_float3(30.0f, 50.0f, 30.0f), 1.7f, 0.0f},
     };
 
+    // Whole sequence, since the floor has to cover wherever the actors get to.
+    float3 lo = mesh.positions[0], hi = mesh.positions[0];
+    if (animated) {
+        sequence.bounds(lo, hi);
+    } else {
+        for (const float3 &p : mesh.positions) {
+            lo = fminf(lo, p);
+            hi = fmaxf(hi, p);
+        }
+    }
+    const float margin = fmaxf(2.0f, 0.12f * max_component(hi - lo));
+
+    // Floor sized to the scene. Its height is fixed, and is where the tools put feet.
     Plane floor{};
     floor.y = -4.0f;
-    floor.half_extent_x = 10.0f;
-    floor.z_min = -30.0f;
-    floor.z_max = -10.0f;
+    floor.half_extent_x = fmaxf(fabsf(lo.x), fabsf(hi.x)) + margin;
+    floor.z_min = lo.z - margin;
+    floor.z_max = fminf(-1.0f, hi.z + margin);  // never in front of the camera
     floor.checker_scale = 0.5f;
     floor.material = make_material(make_float3(1.0f, 1.0f, 1.0f), 1.0f, 0.0f, 0.0f, 1.0f);
 
-    gpu::init(width, height, mesh, bvh, ivory, lights, floor);
+    gpu::init(width, height, mesh, bvh, materials, tri_material, lights, floor);
 
-    // A second argument names an output directory and switches to offline mode.
-    if (animated && argc > 2) return render_offline(sequence, mesh, bvh, argv[2]);
+    const View view = frame_camera(lo, hi);
+
+    // Second argument is an output directory, third orbits, fourth sets quality.
+    if (argc > 2) {
+        const float turns = argc > 3 ? strtof(argv[3], nullptr) : 0.0f;
+        const int samples = argc > 4 ? atoi(argv[4]) : offline_samples;
+        return render_offline(sequence, mesh, bvh, argv[2], view, animated, turns,
+            std::max(1, samples));
+    }
 
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         std::cerr << "SDL_Init: " << SDL_GetError() << "\n";
@@ -156,14 +276,17 @@ int main(int argc, char **argv) {
 
     SDL_Window *window = SDL_CreateWindow("render-pipeline", SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_RESIZABLE);
-    // No vsync flag: it would cap the loop at the monitor refresh and hide the real speed.
+    // No vsync: it would cap the loop at the refresh rate and hide the real speed.
     SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
         SDL_TEXTUREACCESS_STREAMING, width, height);
     SDL_RenderSetLogicalSize(renderer, width, height);
 
-    float3 position = make_float3(0, 0, 0);
-    float yaw = 0, pitch = 0;
+    // Starts from the same framing as the offline path, then the controls take over.
+    const Camera start = camera_at(view, 0.0f);
+    float3 position = start.position;
+    float yaw = atan2f(start.forward.x, -start.forward.z);
+    float pitch = asinf(std::max(-1.0f, std::min(1.0f, start.forward.y)));
     bool looking = false, running = true, smooth_normals = true, playing = animated;
     int frame = 0;
     int anim_frame = 0;
@@ -199,7 +322,7 @@ int main(int argc, char **argv) {
                 case SDL_MOUSEMOTION:
                     if (looking) {
                         yaw += static_cast<float>(event.motion.xrel) * 0.004f;
-                        // Must stay short of +/-pi/2, where the camera basis degenerates.
+                        // Stays short of a quarter turn, where the basis degenerates.
                         pitch = std::max(-1.55f, std::min(1.55f,
                             pitch - static_cast<float>(event.motion.yrel) * 0.004f));
                     }
@@ -240,11 +363,11 @@ int main(int argc, char **argv) {
                 anim_frame = (anim_frame + 1) % sequence.frame_count();
                 stepped = true;
             }
-            // Interactive: few samples per frame, so the cheap tree wins.
+            // Few samples per frame here, so the cheaper refit wins.
             if (stepped) advance_to(sequence, anim_frame, mesh, bvh, false);
         }
 
-        // Any change to the picture restarts the average; pausing lets it settle.
+        // Any change restarts the average, so pausing lets the image settle.
         const bool moved = position.x != prev_position.x || position.y != prev_position.y ||
             position.z != prev_position.z || yaw != prev_yaw || pitch != prev_pitch ||
             smooth_normals != prev_smooth || stepped;
