@@ -204,8 +204,8 @@ through both and be compared. On the flying kick:
 | | |
 |---|---|
 | Pose agreement after rigid alignment | 69 mm per joint |
-| Distance travelled, GEM | 1.56 m |
-| Distance travelled, Motion-X | 1.95 m |
+| Distance traveled, GEM | 1.56 m |
+| Distance traveled, Motion-X | 1.95 m |
 
 Read that as two independent estimators agreeing to about 7 cm, not as an
 accuracy figure. Motion-X's own numbers are estimates from the same footage, not
@@ -353,7 +353,7 @@ of entering a box scales with its surface area, so the cost of a split is
 area(left) x count(left)  +  area(right) x count(right)
 ```
 
-Minimising that avoids cutting through a dense cluster and leaving half the
+Minimizing that avoids cutting through a dense cluster and leaving half the
 model in each child.
 
 ### Animation
