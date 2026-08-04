@@ -130,7 +130,7 @@ def main():
         with open(listing, "w") as f:
             for p in parts:
                 f.write(f"file '{p}'\n")
-        # Joined without re-encoding, safe because every part used the same encode.
+        # Joined without encoding again, safe because every part used the same encode.
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
                         "-i", listing, "-c", "copy", args.out], check=True)
     finally:

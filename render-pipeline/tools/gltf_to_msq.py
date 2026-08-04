@@ -4,13 +4,13 @@ glTF carries a mesh, skeleton, weights and animation in one file and needs no
 registration, so the pipeline can be exercised without the research body models.
 The deformation is linear blend skinning, the same operation SMPL applies.
 
-A known-good file to test with (CC-BY, no registration):
+A file to test with, free and needing no account:
 
     curl -sLO https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/CesiumMan/glTF-Binary/CesiumMan.glb
     python tools/gltf_to_msq.py CesiumMan.glb --out walk.msq
     mkdir frames && ./build/render-pipeline walk.msq frames/
 
-Scope: .glb, LINEAR interpolation, non-sparse accessors, one skinned primitive.
+Scope: .glb, LINEAR interpolation, dense accessors, one skinned primitive.
 Anything outside that raises rather than quietly producing a mangled body.
 """
 
@@ -89,11 +89,7 @@ def quat_to_matrix(q):
 
 
 def slerp(a, b, t):
-    """Shortest-arc quaternion interpolation.
-
-    Interpolating the four numbers directly cuts the corner and changes speed
-    through the arc, which shows on a limb swinging through a large angle.
-    """
+    """Shortest arc quaternion interpolation, so a swinging limb keeps its speed."""
     dot = float(np.dot(a, b))
     if dot < 0.0:  # the far way round is the same rotation; take the near one
         b, dot = -b, -dot
@@ -108,7 +104,7 @@ def slerp(a, b, t):
 def local_matrix(node, override):
     """A node's own transform, with any animated channels substituted in."""
     if "matrix" in node and not override:
-        # glTF stores matrices column-major; numpy reads row-major.
+        # glTF stores matrices column major, and numpy reads row major.
         return np.asarray(node["matrix"], np.float64).reshape(4, 4).T
 
     t = override.get("translation", node.get("translation", [0, 0, 0]))
@@ -202,7 +198,7 @@ def bake(path, fps=30.0, max_frames=0):
     # Unnormalised weights inflate or shrink the body without looking wrong.
     weights = weights / np.maximum(weights.sum(axis=1, keepdims=True), 1e-12)
 
-    # Column-major again, one 4x4 per joint.
+    # Column major again, one 4x4 per joint.
     ibm = g.accessor(skin["inverseBindMatrices"]).reshape(-1, 4, 4).transpose(0, 2, 1)
 
     animation = g.json["animations"][0]
@@ -236,11 +232,7 @@ def bake(path, fps=30.0, max_frames=0):
 
 
 def verify_bind_pose(path):
-    """At the bind pose every skin matrix must be identity and the mesh must
-    reproduce itself. That one check covers accessor strides, the column-major
-    convention, quaternion order and the joint indirection at once, and guards
-    against a plausible looking body in the wrong shape.
-    """
+    """At the bind pose every skin matrix is identity and the mesh reproduces itself."""
     g = Gltf(path)
     index = skinned_mesh_node(g)
     node = g.json["nodes"][index]
@@ -278,12 +270,7 @@ def verify_bind_pose(path):
 
 
 def detect_up(frame):
-    """Guess the up axis from one frame's proportions.
-
-    glTF declares Y-up and plenty of files ignore it; CesiumMan is Z-up. One
-    frame, not the whole sequence, because travel becomes the longest axis over
-    a clip. Weak for a wide T-pose, so it is reported and can be overridden.
-    """
+    """Guess the up axis from one frame, since travel wins over a whole clip."""
     extent = frame.max(0) - frame.min(0)
     return int(np.argmax(extent)), extent
 

@@ -6,10 +6,8 @@ reads the manifest.
     python tools/scan_video.py ~/Downloads/archive --out scans/
     python tools/scan_video.py scans/ --report --top 20
 
-Cuts come from two signals. The scene score is frame accurate but nearly blind
-on grass, where a cut barely changes the picture. Person boxes are the reverse,
-unmistakable across a cut but only located to a sample. So the boxes say a cut
-happened and the scene score says which frame.
+Cuts come from two signals. The bodies say a cut happened, since they jump to an
+unrelated arrangement. The scene score says which frame it happened on.
 
 Needs ultralytics and a YOLO model, both already in GEM's virtualenv.
 """
@@ -108,12 +106,7 @@ def detect(video, stride, imgsz, conf):
 
 
 def displacement(a, b, width, height):
-    """How far the people moved between two samples, as a fraction of the frame.
-
-    Median nearest centre distance, measured both ways so a cut onto a busier
-    shot cannot hide. Distance rather than overlap, because a wide shot player
-    is forty pixels across and running alone already collapses IoU.
-    """
+    """Median nearest centre distance between two samples, as a frame fraction."""
     if not a or not b:
         return 1.0 if (a or b) else 0.0
 

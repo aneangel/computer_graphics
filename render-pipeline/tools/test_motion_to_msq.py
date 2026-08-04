@@ -27,7 +27,7 @@ def check(name, condition, detail=""):
 print("Motion-X layout")
 frames = 7
 block = np.zeros((frames, MOTIONX_WIDTH), np.float32)
-# Distinct value per field, so a mis-sliced offset shows up.
+# Distinct value per field, so a wrongly sliced offset shows up.
 for value, (start, width) in enumerate(
     [(0, 3), (3, 63), (66, 90), (156, 3), (159, 50), (209, 100), (309, 3), (312, 10)], start=1
 ):
@@ -62,14 +62,14 @@ check("hand poses dropped", np.all(m["pose_body"] == 2))
 check("betas trimmed to 10", m["betas"].shape == (10,))
 
 print("axis conversion")
-# One point one unit along each axis, z-up. Expect (x, z, -y).
+# One point one unit along each axis, z up. Expect (x, z, -y).
 pts = np.array([[[1, 0, 0], [0, 1, 0], [0, 0, 1]]], np.float32)
 out = place_in_scene(pts, up="z", height=1.0, centre=(0.0, 0.0), floor_y=0.0)
 direction = out[0, 2] - out[0, 0]  # was +z, should now point up in y
 check("z becomes up", direction[1] > 0, f"delta {direction.round(2)}")
 
 print("scene fit")
-# A 2-unit-tall box that also drifts sideways over three frames.
+# A box two units tall that also drifts sideways over three frames.
 box = np.array([[-0.5, -1.0, -0.5], [0.5, -1.0, 0.5], [0.5, 1.0, 0.5], [-0.5, 1.0, -0.5]], np.float32)
 seq = np.stack([box + np.array([d, 0, 0], np.float32) for d in (0.0, 1.0, 2.0)])
 out = place_in_scene(seq, up="y", height=6.0, centre=(0.0, -16.0), floor_y=-4.0)

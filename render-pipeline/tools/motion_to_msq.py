@@ -137,11 +137,7 @@ def open_clip(path, clip):
 
 
 def detect_up(joints, pelvis=0, head=15):
-    """Up axis and sign, from the mean pelvis to head vector.
-
-    A bounding box fails here, since a leap is horizontal much of the time.
-    Format is no guide either, as every source ships a different convention.
-    """
+    """Up axis and sign, from the mean pelvis to head vector."""
     direction = (joints[:, head] - joints[:, pelvis]).mean(axis=0)
     axis = int(np.argmax(np.abs(direction)))
     return axis, float(np.sign(direction[axis]))
@@ -173,12 +169,7 @@ def rotation_between(a, b):
 
 
 def ground_alignment(joints, max_tilt=50.0, min_spread=0.05):
-    """Rotation that stands the body on a level floor, facing the camera.
-
-    Up is fitted to the plane the feet touched, since a kick is not vertical but
-    a floor never moves. Facing comes from the hips. Returns the rotation, the
-    tilt in degrees, and the yaw in degrees.
-    """
+    """Rotation standing the body level and facing the camera, plus tilt and yaw."""
     feet = joints[:, [J_LFOOT, J_RFOOT]].reshape(-1, 3)
     low = feet[feet[:, 1] <= np.quantile(feet[:, 1], 0.25)]
 
@@ -308,10 +299,7 @@ def to_vertices(motion, model_path, chunk=128):
 
 
 def place_in_scene(verts, up="z", height=6.0, centre=(0.0, -16.0), floor_y=-4.0):
-    """Fit the sequence into the default scene, once over every frame.
-
-    Per frame fitting would cancel the motion and leave a walker on the spot.
-    """
+    """Fit the sequence into the default scene, once over every frame."""
     if up == "z":
         # Body models are usually authored z up, and the renderer is y up.
         verts = np.stack([verts[..., 0], verts[..., 2], -verts[..., 1]], axis=-1)

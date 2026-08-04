@@ -4,13 +4,10 @@ An estimator reading across a camera cut sees a person teleport, so this only
 ever cuts where the footage already does.
 
     python tools/clip_video.py match.mp4 --out-dir clips/
-    python tools/clip_video.py ~/Downloads/archive --out-dir clips/ --limit 40
 
-Finding cuts from the picture alone is weak, since a cut between two cameras
-aimed at the same grass barely changes it. With --scan the boundaries and the
-choice of shots come from scan_video.py, which watched the people instead.
+Cuts found from the picture alone are weak on grass. With --scan they come from
+scan_video.py, which watched the people instead.
 
-    python tools/scan_video.py ~/Downloads/archive --out scans/
     python tools/clip_video.py --scan scans/ --out-dir clips/ --limit 40
 """
 
@@ -61,7 +58,7 @@ def cut(video, start, length, path, fps):
     """Write one segment, unless it is already there."""
     if os.path.exists(path):
         return
-    # Re-encoded, since a stream copy can only cut on keyframes.
+    # Encoded again, since a stream copy can only cut on keyframes.
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{start:.2f}",
            "-i", video, "-t", f"{length:.2f}", "-an"]
     if fps:

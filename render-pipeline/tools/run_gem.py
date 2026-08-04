@@ -1,17 +1,15 @@
 """Estimate motion for every tracked person in a clip, not just the biggest one.
 
-GEM recovers one person per run and keeps only the largest track. It caches
-those boxes to preprocess/bbx.pt and reads them back, so writing that file first
-points it at whoever we like. Nothing in GEM is modified.
+GEM keeps only the largest track, but it caches those boxes and reads them back,
+so writing that file first points it at whoever we like. Nothing in GEM changes.
 
     python tools/track_people.py clip.mp4 --out tracks/clip.json
     python tools/run_gem.py tracks/clip.json --out gem/clip --max-actors 4
 
 The clip is trimmed to the window where the chosen actors are all present, since
-a scene has a fixed vertex count and nobody in it can simply stop existing.
+a scene has a fixed vertex count and nobody in it can stop existing.
 
-GEM is under the NVIDIA OneWay Noncommercial License. See docs/INSTALL.md in the
-clone for setup.
+GEM is under the NVIDIA OneWay Noncommercial License.
 """
 
 import argparse
@@ -54,11 +52,7 @@ def quality(track):
 
 
 def choose_actors(tracks, max_actors, min_frames):
-    """Pick actors that coexist, and the window over which they all do.
-
-    Greedy on quality, keeping each only while the shared window stays usable.
-    Picking the best first and intersecting after collapses to nothing.
-    """
+    """Pick actors that coexist, greedily, and the window over which they all do."""
     ranked = sorted(tracks, key=quality, reverse=True)
 
     chosen, first, last = [], None, None
@@ -75,11 +69,7 @@ def choose_actors(tracks, max_actors, min_frames):
 
 
 def trim(video, out, first, last):
-    """Cut frames first to last inclusive, counted rather than timed.
-
-    Frame numbers line up with the tracks. Timestamps drift by a frame and put
-    every box on the wrong picture.
-    """
+    """Cut frames first to last inclusive, counted so they line up with the tracks."""
     if os.path.exists(out):
         return out
     subprocess.run(

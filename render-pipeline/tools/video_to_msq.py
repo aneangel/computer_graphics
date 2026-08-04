@@ -112,7 +112,7 @@ def estimate_motion(video, static_cam=False):
 
 
 def pose_body(params_path, model_path):
-    """Turn saved parameters into per-frame vertices. Returns (verts, faces, joints)."""
+    """Turn saved parameters into per frame vertices. Returns (verts, faces, joints)."""
     with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
         out_path = tmp.name
     try:

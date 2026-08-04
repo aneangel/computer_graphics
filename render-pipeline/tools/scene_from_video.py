@@ -119,11 +119,7 @@ def ball_observations(boxes, seen, K):
 
 
 def anchor_to_bodies(points, good, uv, actors, K, pixel_radius=45.0):
-    """Where the ball sits over a body in frame, take the body's depth instead.
-
-    A body's depth is far better known than a ball's, so the body wins. Returns
-    the corrected points and which frames were anchored.
-    """
+    """Where the ball sits over a body in frame, take the body's depth instead."""
     fx, fy = float(K[0, 0]), float(K[1, 1])
     cx, cy = float(K[0, 2]), float(K[1, 2])
 
@@ -156,11 +152,7 @@ def anchor_to_bodies(points, good, uv, actors, K, pixel_radius=45.0):
 
 
 def fit_trajectory(points, good, weight_depth=0.02, smooth=40.0):
-    """Smooth path through sparse observations, as one least squares system.
-
-    Fits the measurements and penalises sudden changes of velocity, which is
-    what carries the trajectory across the gaps. Depth is weighted low.
-    """
+    """Smooth path through sparse observations, as one least squares system."""
     n = len(points)
     if good.sum() < 2:
         return None
@@ -192,12 +184,7 @@ def fit_trajectory(points, good, weight_depth=0.02, smooth=40.0):
 
 
 def limit_speed(verts, fps, max_speed=12.0):
-    """Cap how far a body may travel between frames, and rebuild its path.
-
-    Catches a slipped box taking the recovered depth with it. The cap is a
-    sprinter's top speed, so only impossible motion is touched. Returns the
-    corrected vertices and how far the worst frame moved.
-    """
+    """Cap how far a body travels between frames, and rebuild its path."""
     centre = verts.mean(axis=1)
     steps = np.diff(centre, axis=0)
     distance = np.linalg.norm(steps, axis=1)
@@ -273,10 +260,7 @@ def rest_on_ground(ball, floor, radius):
 
 
 def place_scene(actors, ball, height=6.0, centre_x=0.0, nearest_z=-11.0, floor_y=-4.0):
-    """Fit the scene into the renderer's box, one transform for everybody.
-
-    Scale comes off the actors, whose real size is the one thing known for free.
-    """
+    """Fit the scene into the renderer's box, one transform for everybody."""
     per_actor = [float(np.median(v[..., 1].max(axis=1) - v[..., 1].min(axis=1)))
                  for v in actors]
     scale = height / max(float(np.median(per_actor)), 1e-6)

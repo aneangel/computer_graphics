@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
         base = make_uv_sphere(center, radius, 96, 48);
     }
 
-    // Non-rigid on purpose: the surface changes shape, so the rest normals stop
+    // Not rigid on purpose: the surface changes shape, so the rest normals stop
     // describing it and have to be rebuilt.
     std::vector<std::vector<float3>> frames;
     frames.reserve(frame_count);

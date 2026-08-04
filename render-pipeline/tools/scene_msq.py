@@ -6,8 +6,6 @@ table saying which run of triangles is whose.
     python tools/scene_msq.py a.msq b.msq --out scene.msq \
         --colour 0.10,0.25,0.80 --colour 0.90,0.90,0.90
 
-    python tools/scene_msq.py players.msq --ball ball.json --out scene.msq
-
 Sequences written one at a time were each centred on the same spot, so merging
 them unaltered stands everybody inside everybody else. Use --offset for those.
 

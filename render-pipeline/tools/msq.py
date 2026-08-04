@@ -20,10 +20,7 @@ _OBJECT_SIZE = struct.calcsize(_OBJECT)
 
 
 def write_msq(path, faces, verts, fps=30.0, objects=None):
-    """Write faces (F,3) and per frame positions (T,V,3) to `path`.
-
-    `objects` is an optional list of (first_triangle, triangle_count, (r,g,b)).
-    """
+    """Write faces (F,3), positions (T,V,3) and optional objects to `path`."""
     faces = np.ascontiguousarray(faces, dtype="<i4")
     verts = np.ascontiguousarray(verts, dtype="<f4")
 

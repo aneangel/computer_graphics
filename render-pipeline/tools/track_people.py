@@ -62,10 +62,7 @@ def detect(video, imgsz, conf):
 
 
 class Track:
-    """One person, carried forward by a constant velocity filter.
-
-    State is centre, size and centre velocity. Size gets no velocity of its own.
-    """
+    """One person, carried forward by a constant velocity filter."""
 
     _F = np.eye(6, dtype=np.float64)
     _F[0, 4] = _F[1, 5] = 1.0
@@ -182,10 +179,7 @@ def track_people(frames, args):
 
 
 def track_ball(frames, args):
-    """Follow the ball, matched by predicted position rather than overlap.
-
-    A ball can move further than its own width between frames, so IoU fails.
-    """
+    """Follow the ball, matched by predicted position rather than overlap."""
     x = None  # [cx, cy, vx, vy]
     missed = 0
     boxes, seen = [], []
@@ -208,7 +202,7 @@ def track_ball(frames, args):
         if pick is None:
             missed += 1
             if x is not None:
-                # Dropped after a few frames, or a stale prediction rejects every re-sighting.
+                # Dropped after a few frames, or a stale prediction rejects every sighting.
                 x = None if missed > args.ball_max_age else \
                     np.concatenate([x[:2] + x[2:], x[2:] * 0.9])
             boxes.append(boxes[-1] if boxes else [0.0, 0.0, 0.0, 0.0])
